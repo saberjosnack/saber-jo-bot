@@ -11,6 +11,9 @@ module.exports = {
   greenApiInstanceId: process.env.GREEN_API_INSTANCE_ID,
   greenApiToken: process.env.GREEN_API_TOKEN,
 
+  ultramsgInstanceId: process.env.ULTRAMSG_INSTANCE_ID,
+  ultramsgToken: process.env.ULTRAMSG_TOKEN,
+
   whatsappToken: process.env.WHATSAPP_TOKEN,
   whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN,

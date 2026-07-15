@@ -78,6 +78,16 @@ function extractIncomingMessage(body) {
     };
   }
 
+  if (env.waProvider === "ultramsg") {
+    const data = body?.data;
+    // نتجاهل رسائلنا يلي بعتناها إحنا (fromMe) عشان ما يرد البوت على نفسه
+    if (!data || data.fromMe) return { from: null, text: null };
+    return {
+      from: data.from?.replace("@c.us", ""),
+      text: data.body,
+    };
+  }
+
   // Green API
   const messageData = body?.messageData;
   return {
