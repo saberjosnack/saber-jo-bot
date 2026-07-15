@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "name": "المالك",
+    "email": "owner@saberjo.com",
+    "role": "owner",
+    "status": "active",
+    "passwordHash": null,
+    "resetToken": null,
+    "resetTokenExpires": null
+  }
+]

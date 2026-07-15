@@ -1,0 +1,13 @@
+[
+  { "id": 1, "name": "زنجر", "category": "ساندويشات", "price": null, "available": true, "description": "صدر دجاج مقرمش بصوص خاص", "salesCount": 0, "featured": true, "featuredNote": "من الأكثر طلباً — يُقترح لأي زبون مو مقرر" },
+  { "id": 2, "name": "سكالوب", "category": "ساندويشات", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" },
+  { "id": 3, "name": "برجر 150 غرام", "category": "ساندويشات", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" },
+  { "id": 4, "name": "داينمايت زنجر (40 سم)", "category": "ساندويشات", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" },
+
+  { "id": 5, "name": "كومبو اقتصادي", "category": "كومبوهات", "price": null, "available": true, "description": "", "salesCount": 0, "featured": true, "featuredNote": "أرخص خيار — يُقترح لزبون بيسأل عن السعر" },
+  { "id": 6, "name": "كومبو عائلي", "category": "كومبوهات", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" },
+  { "id": 7, "name": "كومبو جاينتس", "category": "كومبوهات", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" },
+
+  { "id": 8, "name": "وجبة شاورما اقتصادية", "category": "شاورما", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" },
+  { "id": 9, "name": "وجبة شاورما عائلية", "category": "شاورما", "price": null, "available": true, "description": "", "salesCount": 0, "featured": false, "featuredNote": "" }
+]
