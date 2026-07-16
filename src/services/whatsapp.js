@@ -54,18 +54,17 @@ async function sendImageViaUltraMsg(cfg, to, imageUrl, caption = "") {
 }
 
 async function sendViaWasender(cfg, to, text) {
+  const formattedTo = to.startsWith("+") ? to : `+${to}`;
   const res = await fetch("https://www.wasenderapi.com/api/send-message", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${cfg.wasenderApiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ to, text }),
+    body: JSON.stringify({ to: formattedTo, text }),
   });
-  if (!res.ok) {
-    const errBody = await res.text();
-    console.error(`[wasender] فشل الإرسال (${res.status}):`, errBody);
-  }
+  const body = await res.text();
+  console.log(`[wasender] رد الإرسال (${res.status}):`, body);
 }
 
 async function sendImageViaWasender(cfg, to, imageUrl, caption = "") {
