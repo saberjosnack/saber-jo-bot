@@ -39,7 +39,7 @@ async function sendImageViaUltraMsg(to, imageUrl, caption = "") {
 }
 
 async function sendViaWasender(to, text) {
-  await fetch("https://www.wasenderapi.com/api/send-message", {
+  const res = await fetch("https://www.wasenderapi.com/api/send-message", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.wasenderApiKey}`,
@@ -47,6 +47,10 @@ async function sendViaWasender(to, text) {
     },
     body: JSON.stringify({ to, text }),
   });
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error(`[wasender] فشل الإرسال (${res.status}):`, errBody);
+  }
 }
 
 async function sendImageViaWasender(to, imageUrl, caption = "") {
