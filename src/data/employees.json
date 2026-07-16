@@ -1,11 +1,11 @@
 [
   {
     "id": 1,
-    "name": "المالك",
-    "email": "owner@saberjo.com",
+    "name": "Waled",
+    "email": "waled.alsaber123@gmail.com",
     "role": "owner",
     "status": "active",
-    "passwordHash": null,
+    "passwordHash": "$2b$10$hQv6k6l9V4h6yA8n0uQ8DOY7m0nV2VqjKqL6m5jQwY2L1JvX8mM4K",
     "resetToken": null,
     "resetTokenExpires": null
   }
