@@ -30,7 +30,8 @@ async function generateReply(history, userMessage, image = null, configId = "def
     body: JSON.stringify({
       model: env.aiModel,
       max_tokens: 500,
-      system: systemPrompt,
+      // الجزء الثابت (منيو، توصيل، حواجز) بيتخزن مؤقتاً — كل رسالة بعدها بتدفع 10% بس من سعره
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages,
     }),
   });
