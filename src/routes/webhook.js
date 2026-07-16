@@ -21,11 +21,22 @@ router.get("/", (req, res) => {
 router.post("/", async (req, res) => {
   res.sendStatus(200); // نرد على المنصة فوراً، والمعالجة تصير بالخلفية
 
+  console.log("[webhook] رسالة وصلت، المزود:", env.waProvider);
+  console.log("[webhook] المحتوى الخام:", JSON.stringify(req.body).slice(0, 500));
+
   try {
     const { from, text } = extractIncomingMessage(req.body);
+    console.log("[webhook] المستخرج — from:", from, "| text:", text);
+
+    if (!from || !text) {
+      console.log("[webhook] تجاهلت الرسالة (from أو text فاضيين).");
+      return;
+    }
+
     // ملاحظة: مزودي Green/UltraMsg/Cloud هون معدّين لبوت واحد بس ("default").
     // تعدد البوتات بالوقت الحالي مفعّل بالكامل بس مع WA_PROVIDER=selfhosted.
     await handleIncomingMessage("default", from, text, null, whatsapp.sendText);
+    console.log("[webhook] تمت معالجة الرسالة والرد بنجاح.");
   } catch (err) {
     console.error("خطأ بمعالجة رسالة واردة:", err);
   }

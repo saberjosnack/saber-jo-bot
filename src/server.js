@@ -28,4 +28,5 @@ if (env.waProvider === "selfhosted") {
 
 app.listen(env.port, () => {
   console.log(`Saber Jo Snack API شغال على المنفذ ${env.port}`);
+  console.log(`WA_PROVIDER الحالي: ${env.waProvider}`);
 });
