@@ -5,7 +5,7 @@
     "email": "waled.alsaber123@gmail.com",
     "role": "owner",
     "status": "active",
-    "passwordHash": "$2b$10$hQv6k6l9V4h6yA8n0uQ8DOY7m0nV2VqjKqL6m5jQwY2L1JvX8mM4K",
+    "passwordHash": "$2a$10$ic9zydClqKn.qNYS5xgGquNypXBNcRWpl2r8eQCWLasKxFgG9y2iW",
     "resetToken": null,
     "resetTokenExpires": null
   }
