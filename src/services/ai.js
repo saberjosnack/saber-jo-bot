@@ -5,10 +5,11 @@ const { buildSystemPrompt } = require("./promptBuilder");
  * @param {Array<{role: "user"|"assistant", content: any}>} history
  * @param {string} userMessage
  * @param {{base64: string, mediaType: string} | null} image - صورة أرسلها الزبون (اختياري)
+ * @param {string} configId - أي بوت/قالب إعدادات نستخدم
  * @returns {Promise<string>} رد البوت النصي
  */
-async function generateReply(history, userMessage, image = null) {
-  const systemPrompt = buildSystemPrompt();
+async function generateReply(history, userMessage, image = null, configId = "default") {
+  const systemPrompt = buildSystemPrompt(configId);
 
   const userContent = image
     ? [

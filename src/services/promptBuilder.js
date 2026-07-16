@@ -34,10 +34,10 @@ function isOpenNow(openTime, closeTime, nowJordan = new Date()) {
   return minutesNow >= openMinutes && minutesNow < closeMinutes;
 }
 
-function buildSystemPrompt() {
-  const settings = store.read("settings.json");
-  const menu = store.read("menu.json");
-  const fees = store.read("deliveryFees.json");
+function buildSystemPrompt(configId = "default") {
+  const settings = store.read(`configs/${configId}/settings.json`);
+  const menu = store.read(`configs/${configId}/menu.json`);
+  const fees = store.read(`configs/${configId}/deliveryFees.json`);
 
   const { identity, style, guardrails, customRules, prompt } = settings;
 

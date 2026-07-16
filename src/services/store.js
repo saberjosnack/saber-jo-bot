@@ -14,7 +14,12 @@ function read(file) {
 
 function write(file, data) {
   const p = path.join(DATA_DIR, file);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf-8");
 }
 
-module.exports = { read, write };
+function exists(file) {
+  return fs.existsSync(path.join(DATA_DIR, file));
+}
+
+module.exports = { read, write, exists };

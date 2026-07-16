@@ -7,26 +7,44 @@
 ```
 saber-jo-bot/
 ├── src/
-│   ├── server.js              # نقطة تشغيل السيرفر
-│   ├── config/env.js          # قراءة متغيرات البيئة
+│   ├── server.js
+│   ├── config/env.js
 │   ├── routes/
-│   │   ├── webhook.js         # استقبال رسائل واتساب/ميتا
-│   │   ├── auth.js            # تسجيل الدخول + نسيت كلمة المرور
-│   │   └── dashboard.js       # API الداشبورد (منيو، توصيل، إعدادات، موظفين)
+│   │   ├── webhook.js         # استقبال رسائل Green/UltraMsg/Cloud (بوت "default" فقط)
+│   │   ├── auth.js
+│   │   ├── dashboard.js       # موظفين + محادثات موقوفة
+│   │   └── bots.js            # CRUD كامل للبوتات: إنشاء، منيو، إعدادات، توصيل، QR
 │   ├── services/
-│   │   ├── ai.js              # الاتصال بموديل Claude
-│   │   ├── whatsapp.js        # إرسال الرسائل (Green API أو Meta Cloud API)
-│   │   ├── promptBuilder.js   # يبني البرومبت النهائي من الإعدادات
-│   │   └── mailer.js          # إرسال إيميلات (استرجاع كلمة مرور، دعوات موظفين)
-│   ├── middleware/auth.js     # حماية الـ API بالتوكن + الصلاحيات
-│   └── data/                  # تخزين مبدئي (JSON) — يتبدّل لقاعدة بيانات حقيقية لاحقاً
-│       ├── menu.json
-│       ├── deliveryFees.json
-│       ├── settings.json
-│       ├── employees.json
-│       └── orders.json
+│   │   ├── ai.js
+│   │   ├── whatsapp.js        # Green API / UltraMsg / Cloud API (بوت واحد)
+│   │   ├── selfHostedWhatsapp.js  # اتصال مباشر متعدد البوتات (Baileys)
+│   │   ├── botStore.js        # إدارة سجل البوتات والقوالب المشتركة
+│   │   ├── messageHandler.js  # منطق الرد المشترك بين كل المزودين
+│   │   ├── promptBuilder.js
+│   │   └── mailer.js
+│   ├── middleware/auth.js
+│   └── data/
+│       ├── bots.json                    # سجل كل البوتات
+│       ├── configs/{configId}/          # منيو + توصيل + برومبت — ممكن يشاركه أكتر من بوت
+│       │   ├── menu.json
+│       │   ├── deliveryFees.json
+│       │   └── settings.json
+│       ├── bots/{botId}/                # بيانات خاصة بكل بوت لحاله
+│       │   ├── conversations.json
+│       │   ├── pausedConversations.json
+│       │   ├── orders.json
+│       │   └── wa-auth/                 # جلسة واتساب (لا تُرفع لـ GitHub أبداً)
+│       └── employees.json
 └── docs/architecture.md
 ```
+
+## تعدد البوتات
+
+كل بوت إله سجل مستقل (`bots/{id}/`) لمحادثاته وطلباته، وإله "قالب إعدادات" (`configId`) فيه المنيو والتوصيل والبرومبت. لما تنشئ بوت جديد، تقدر:
+- تعطيه قالب جديد مستقل (منيو وتعليمات خاصة فيه)، أو
+- تخليه يشارك **نفس** قالب بوت موجود — فأي تعديل عالمنيو أو التعليمات بينعكس على كل البوتات يلي عم تشاركه.
+
+الربط بواتساب لكل بوت مستقل تماماً (رقم مختلف، جلسة مختلفة)، حتى لو شاركوا نفس المنيو.
 
 ## التشغيل محلياً
 

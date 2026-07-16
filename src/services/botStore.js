@@ -1,0 +1,98 @@
+const { v4: uuid } = require("uuid");
+const store = require("./store");
+
+function listBots() {
+  return store.read("bots.json");
+}
+
+function getBot(botId) {
+  return listBots().find((b) => b.id === botId) || null;
+}
+
+function saveBots(bots) {
+  store.write("bots.json", bots);
+}
+
+/**
+ * ينشئ بوت جديد.
+ * @param {string} name - اسم البوت
+ * @param {string|null} shareConfigFromBotId - لو محدد، البوت الجديد بيستخدم نفس منيو/تعليمات هاد البوت (إعدادات مشتركة).
+ *                                              لو null، بينعمل له قالب إعدادات مستقل (نسخة عن الافتراضي يبلش منها ويعدل عليها).
+ */
+function createBot(name, shareConfigFromBotId = null) {
+  const bots = listBots();
+  const id = uuid();
+
+  let configId;
+
+  if (shareConfigFromBotId) {
+    const sourceBot = bots.find((b) => b.id === shareConfigFromBotId);
+    if (!sourceBot) throw new Error("البوت المطلوب مشاركة إعداداته غير موجود.");
+    configId = sourceBot.configId; // مشاركة فعلية — نفس ملفات المنيو والتعليمات بالضبط
+  } else {
+    configId = uuid();
+    // ننسخ قالب افتراضي عشان البوت الجديد يبلش بمنيو وتعليمات فاضية منظمة، مو من الصفر
+    store.write(`configs/${configId}/settings.json`, defaultSettingsTemplate(name));
+    store.write(`configs/${configId}/menu.json`, []);
+    store.write(`configs/${configId}/deliveryFees.json`, []);
+  }
+
+  store.write(`bots/${id}/conversations.json`, {});
+  store.write(`bots/${id}/pausedConversations.json`, {});
+  store.write(`bots/${id}/orders.json`, []);
+
+  const newBot = {
+    id,
+    name,
+    configId,
+    status: "pending_connection", // لسا ما انربط بواتساب
+    createdAt: new Date().toISOString(),
+  };
+
+  bots.push(newBot);
+  saveBots(bots);
+  return newBot;
+}
+
+function updateBot(botId, patch) {
+  const bots = listBots();
+  const idx = bots.findIndex((b) => b.id === botId);
+  if (idx === -1) throw new Error("البوت غير موجود.");
+  bots[idx] = { ...bots[idx], ...patch };
+  saveBots(bots);
+  return bots[idx];
+}
+
+function deleteBot(botId) {
+  const bots = listBots();
+  const filtered = bots.filter((b) => b.id !== botId);
+  saveBots(filtered);
+  // ملاحظة: ما بنحذف ملفات الـ config تلقائياً لأنو ممكن بوت تاني يشاركها
+}
+
+function defaultSettingsTemplate(employeeName) {
+  return {
+    identity: { employeeName, openTime: "15:00", closeTime: "23:59", salesPower: "mid" },
+    style: { tones: ["ودود"], emojiLevel: "low", responseLength: 400 },
+    voice: { enabled: false, dialect: "الأردن", gender: "أنثى", voiceName: "رنا" },
+    sendImagesAutomatically: true,
+    guardrails: {
+      "no-prices": true,
+      "no-competitors": true,
+      neutral: true,
+      "no-medical": true,
+      "no-fake-promise": true,
+      privacy: true,
+      "no-repeat": true,
+      "no-links": true,
+      "stay-on-topic": true,
+      "no-inappropriate": true,
+    },
+    customRules: [],
+    humanTakeover: { stopWords: ["وقف"], resumeWords: ["كمل"] },
+    orderDestination: { mode: "dashboard", target: "" },
+    prompt: `إنت "${employeeName}" — موظف بشري بيرد على واتساب. احكي طبيعي وودود، واسأل سؤال وحدة بكل مرة.`,
+  };
+}
+
+module.exports = { listBots, getBot, createBot, updateBot, deleteBot };

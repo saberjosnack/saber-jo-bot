@@ -1,7 +1,6 @@
 const express = require("express");
 const env = require("../config/env");
-const store = require("../services/store");
-const { generateReply } = require("../services/ai");
+const { handleIncomingMessage } = require("../services/messageHandler");
 const whatsapp = require("../services/whatsapp");
 
 const router = express.Router();
@@ -24,45 +23,9 @@ router.post("/", async (req, res) => {
 
   try {
     const { from, text } = extractIncomingMessage(req.body);
-    if (!from || !text) return;
-
-    const settings = store.read("settings.json");
-    const paused = store.read("pausedConversations.json");
-    const { stopWords, resumeWords } = settings.humanTakeover;
-
-    const normalized = text.trim();
-
-    // كلمة إيقاف يدوية — تُكتب من جوا نفس محادثة الزبون من طرف الموظف
-    if (stopWords.some((w) => normalized === w)) {
-      paused[from] = { since: new Date().toISOString() };
-      store.write("pausedConversations.json", paused);
-      return;
-    }
-
-    // كلمة استئناف
-    if (resumeWords.some((w) => normalized === w)) {
-      delete paused[from];
-      store.write("pausedConversations.json", paused);
-      return;
-    }
-
-    // البوت ساكت لهاي المحادثة لحد ما ترجعه
-    if (paused[from]) return;
-
-    const conversations = store.read("conversations.json");
-    const history = conversations[from] || [];
-
-    const reply = await generateReply(history, text);
-
-    await whatsapp.sendText(from, reply);
-
-    history.push({ role: "user", content: text });
-    history.push({ role: "assistant", content: reply });
-    conversations[from] = history.slice(-20); // نحتفظ بآخر 20 رسالة بس لتوفير التوكينز
-    store.write("conversations.json", conversations);
-
-    // TODO: لما البوت يستنتج إنو الطلب تأكد، خزنه بـ orders.json
-    // وإذا settings.orderDestination.mode === "whatsapp" ابعت نسخة عبر whatsapp.sendText
+    // ملاحظة: مزودي Green/UltraMsg/Cloud هون معدّين لبوت واحد بس ("default").
+    // تعدد البوتات بالوقت الحالي مفعّل بالكامل بس مع WA_PROVIDER=selfhosted.
+    await handleIncomingMessage("default", from, text, null, whatsapp.sendText);
   } catch (err) {
     console.error("خطأ بمعالجة رسالة واردة:", err);
   }
