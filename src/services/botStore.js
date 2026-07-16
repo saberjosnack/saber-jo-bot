@@ -2,6 +2,7 @@ const { v4: uuid } = require("uuid");
 const store = require("./store");
 
 function listBots() {
+  ensureDefaultBotExists();
   return store.read("bots.json");
 }
 
@@ -96,6 +97,27 @@ function defaultSettingsTemplate(employeeName) {
     orderDestination: { mode: "dashboard", target: "" },
     prompt: `إنت "${employeeName}" — موظف بشري بيرد على واتساب. احكي طبيعي وودود، واسأل سؤال وحدة بكل مرة.`,
   };
+}
+
+// شبكة أمان: لو ملف بوتات ضاع أو انصفّر لأي سبب (مشكلة قرص، ديبلوي...)، البوت الأساسي بيرجع يتولد لحاله
+function ensureDefaultBotExists() {
+  const bots = store.read("bots.json");
+  if (bots.some((b) => b.id === "default")) return;
+
+  if (!store.exists("configs/default/settings.json")) return; // ما في قالب افتراضي أصلاً، ما نقدر نعمل شي
+
+  bots.push({
+    id: "default",
+    name: "سابر (البوت الأساسي)",
+    configId: "default",
+    status: "active",
+    enabled: true,
+    waProvider: null, // بياخذ القيمة من .env تلقائياً
+    waCredentials: {},
+    createdAt: new Date().toISOString(),
+  });
+  store.write("bots.json", bots);
+  console.log("تم إعادة إنشاء البوت الأساسي تلقائياً (شبكة أمان).");
 }
 
 module.exports = { listBots, getBot, createBot, updateBot, deleteBot };
