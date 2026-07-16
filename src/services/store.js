@@ -1,21 +1,28 @@
-// تخزين مبدئي بملفات JSON. كل القراءة والكتابة تمر من هون بس،
-// فلما ننتقل لقاعدة بيانات حقيقية (Postgres) منغيّر هاد الملف بس
-// وباقي المشروع ما بيتأثر.
-
 const fs = require("fs");
 const path = require("path");
 
 const DATA_DIR = path.join(__dirname, "..", "data");
 
-function read(file) {
+function ensureFile(file) {
   const p = path.join(DATA_DIR, file);
-  return JSON.parse(fs.readFileSync(p, "utf-8"));
+
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+
+  if (!fs.existsSync(p)) {
+    fs.writeFileSync(p, "[]", "utf8");
+  }
+
+  return p;
+}
+
+function read(file) {
+  const p = ensureFile(file);
+  return JSON.parse(fs.readFileSync(p, "utf8"));
 }
 
 function write(file, data) {
-  const p = path.join(DATA_DIR, file);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf-8");
+  const p = ensureFile(file);
+  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
 }
 
 function exists(file) {
