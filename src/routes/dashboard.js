@@ -1,4 +1,5 @@
 const express = require("express");
+const bcrypt = require("bcryptjs");
 const { v4: uuid } = require("uuid");
 const store = require("../services/store");
 const { requireAuth, requireRole } = require("../middleware/auth");
@@ -13,8 +14,10 @@ router.get("/employees", requireRole("owner"), (req, res) => {
   res.json(employees);
 });
 
+// body: { name, email, role, assignedBotIds: string[] }
+// assignedBotIds بتنحسب بس لو role مش "owner" (المدير الكامل أصلاً بيشوف كل شي)
 router.post("/employees", requireRole("owner"), async (req, res) => {
-  const { name, email, role } = req.body;
+  const { name, email, role, assignedBotIds } = req.body;
   const employees = store.read("employees.json");
 
   if (employees.some((e) => e.email === email)) {
@@ -27,6 +30,7 @@ router.post("/employees", requireRole("owner"), async (req, res) => {
     name,
     email,
     role,
+    assignedBotIds: role === "owner" ? [] : (assignedBotIds || []),
     status: "pending",
     passwordHash: null,
     resetToken: inviteToken,
@@ -38,7 +42,6 @@ router.post("/employees", requireRole("owner"), async (req, res) => {
   const inviteLink = `${req.protocol}://${req.get("host")}/dashboard?token=${inviteToken}`;
   await sendEmployeeInviteEmail(email, inviteLink, role);
 
-  // بما إنو الإيميل مش مربوط فعلياً لسا، منرجع الرابط بالرد عشان المالك يقدر يبعته يدوياً (واتساب مثلاً)
   res.status(201).json({ id: newEmployee.id, name, email, role, status: "pending", inviteLink });
 });
 
@@ -46,6 +49,35 @@ router.delete("/employees/:id", requireRole("owner"), (req, res) => {
   const employees = store.read("employees.json").filter((e) => e.id !== Number(req.params.id));
   store.write("employees.json", employees);
   res.json({ message: "تم حذف صلاحية الموظف." });
+});
+
+// المالك بيحط كلمة مرور مباشرة للموظف بدل ما يستنى رابط الدعوة
+router.post("/employees/:id/set-password", requireRole("owner"), async (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ error: "كلمة المرور لازم تكون 6 أحرف على الأقل." });
+  }
+  const employees = store.read("employees.json");
+  const employee = employees.find((e) => e.id === Number(req.params.id));
+  if (!employee) return res.status(404).json({ error: "الموظف غير موجود." });
+
+  employee.passwordHash = await bcrypt.hash(newPassword, 10);
+  employee.status = "active";
+  employee.resetToken = null;
+  store.write("employees.json", employees);
+  res.json({ message: "تم تعيين كلمة المرور." });
+});
+
+// تعديل البوتات المسموحة لموظف
+router.put("/employees/:id/bots", requireRole("owner"), (req, res) => {
+  const { assignedBotIds } = req.body;
+  const employees = store.read("employees.json");
+  const employee = employees.find((e) => e.id === Number(req.params.id));
+  if (!employee) return res.status(404).json({ error: "الموظف غير موجود." });
+
+  employee.assignedBotIds = assignedBotIds || [];
+  store.write("employees.json", employees);
+  res.json({ message: "تم تحديث صلاحيات البوتات." });
 });
 
 // ---------- المحادثات الموقوفة يدوياً (كل بوت لحاله) ----------

@@ -578,19 +578,41 @@ function OrdersPanel({ bot, api }) {
 }
 
 const ROLES = [["owner","مدير كامل","وصول لكل شي"],["orders","موظف طلبات","الطلبات والمنيو بس"],["viewer","مشاهدة فقط","بدون تعديل"]];
-function EmployeesPanel({ api }) {
+function EmployeesPanel({ api, allBots }) {
   const [employees, setEmployees] = useState([]);
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [role, setRole] = useState("orders");
+  const [assignedBotIds, setAssignedBotIds] = useState([]);
   const [lastInvite, setLastInvite] = useState(null);
+  const [pwFor, setPwFor] = useState(null);
+  const [pwValue, setPwValue] = useState("");
+
   const load = () => api("/api/dashboard/employees").then(setEmployees).catch(() => {});
   useEffect(() => { load(); }, []);
+
+  const toggleBot = (id) => setAssignedBotIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+
   const invite = async () => {
     if (!name.trim() || !email.trim()) return;
-    const res = await api("/api/dashboard/employees", { method: "POST", body: { name, email, role } });
+    const res = await api("/api/dashboard/employees", { method: "POST", body: { name, email, role, assignedBotIds } });
     setLastInvite(res);
-    setName(""); setEmail(""); load();
+    setName(""); setEmail(""); setAssignedBotIds([]);
+    load();
   };
   const copyLink = () => { navigator.clipboard.writeText(lastInvite.inviteLink); alert("انسخ ✅"); };
+
+  const setPassword = async () => {
+    if (!pwValue || pwValue.length < 6) return alert("كلمة المرور لازم تكون 6 أحرف على الأقل.");
+    await api(`/api/dashboard/employees/${pwFor}/set-password`, { method: "POST", body: { newPassword: pwValue } });
+    alert("تم تعيين كلمة المرور ✅");
+    setPwFor(null); setPwValue(""); load();
+  };
+
+  const updateBotsFor = async (emp, botId) => {
+    const current = emp.assignedBotIds || [];
+    const updated = current.includes(botId) ? current.filter((x) => x !== botId) : [...current, botId];
+    await api(`/api/dashboard/employees/${emp.id}/bots`, { method: "PUT", body: { assignedBotIds: updated } });
+    load();
+  };
 
   return (
     <div className="flexcol gap14">
@@ -608,12 +630,24 @@ function EmployeesPanel({ api }) {
             </div>
           ))}
         </div>
+
+        {role !== "owner" && (
+          <div className="mb14">
+            <label className="small">أي بوتات يشوف؟ (فاضي = ولا وحدة)</label>
+            <div className="flex gap8" style={{ flexWrap: "wrap" }}>
+              {allBots.map((b) => (
+                <div key={b.id} className={`chip ${assignedBotIds.includes(b.id) ? "active" : ""}`} onClick={() => toggleBot(b.id)}>{b.name}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <button className="btn" onClick={invite}>إرسال دعوة</button>
 
         {lastInvite && (
           <div className="panel-2" style={{ marginTop: 14 }}>
             <div style={{ fontSize: 13, marginBottom: 8 }}>
-              رابط الدعوة لـ <b>{lastInvite.name}</b> (الإيميل مش موصول لسا، ابعته يدوياً عن طريق واتساب أو أي وسيلة):
+              رابط الدعوة لـ <b>{lastInvite.name}</b> (ابعته يدوياً عن طريق واتساب لحد ما نفعّل الإيميل):
             </div>
             <div className="flex gap8">
               <input readOnly dir="ltr" value={lastInvite.inviteLink} style={{ fontSize: 12 }} />
@@ -622,14 +656,34 @@ function EmployeesPanel({ api }) {
           </div>
         )}
       </div>
-      <div className="panel flexcol gap8">
+
+      <div className="panel flexcol gap10">
         {employees.map((e) => (
-          <div key={e.id} className="panel-2 flex" style={{ justifyContent: "space-between" }}>
-            <span>{e.name} — {e.email}</span>
-            <div className="flex gap8" style={{ alignItems: "center" }}>
-              <span className="tag tag-pending">{ROLES.find(r => r[0] === e.role)?.[1] || e.role}</span>
-              <span className={`tag ${e.status === "active" ? "tag-on" : "tag-off"}`}>{e.status === "active" ? "نشط" : "دعوة معلقة"}</span>
+          <div key={e.id} className="panel-2 flexcol gap8">
+            <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <span>{e.name} — {e.email}</span>
+              <div className="flex gap8" style={{ alignItems: "center" }}>
+                <span className="tag tag-pending">{ROLES.find(r => r[0] === e.role)?.[1] || e.role}</span>
+                <span className={`tag ${e.status === "active" ? "tag-on" : "tag-off"}`}>{e.status === "active" ? "نشط" : "دعوة معلقة"}</span>
+                <button className="btn-ghost" onClick={() => { setPwFor(pwFor === e.id ? null : e.id); setPwValue(""); }}>🔑 كلمة مرور</button>
+              </div>
             </div>
+
+            {e.role !== "owner" && (
+              <div className="flex gap8" style={{ flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "var(--ink-dim)" }}>البوتات المسموحة:</span>
+                {allBots.map((b) => (
+                  <div key={b.id} className={`chip ${(e.assignedBotIds || []).includes(b.id) ? "active" : ""}`} style={{ padding: "3px 10px", fontSize: 11 }} onClick={() => updateBotsFor(e, b.id)}>{b.name}</div>
+                ))}
+              </div>
+            )}
+
+            {pwFor === e.id && (
+              <div className="flex gap8">
+                <input type="password" dir="ltr" placeholder="كلمة مرور جديدة" value={pwValue} onChange={(ev) => setPwValue(ev.target.value)} />
+                <button className="btn" onClick={setPassword}>حفظ</button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -644,7 +698,11 @@ function Dashboard({ employee, onLogout }) {
   const [tab, setTab] = useState("connections");
   const [newBotName, setNewBotName] = useState("");
 
-  const refreshBots = useCallback(() => { api("/api/bots").then((list) => { setBots(list); setSelectedBotId((cur) => cur || (list[0] && list[0].id)); }); }, []);
+  const refreshBots = useCallback(() => { api("/api/bots").then((list) => {
+    const visible = employee?.role === "owner" ? list : list.filter((b) => (employee?.assignedBotIds || []).includes(b.id));
+    setBots(visible);
+    setSelectedBotId((cur) => cur || (visible[0] && visible[0].id));
+  }); }, [employee]);
   useEffect(() => { refreshBots(); }, []);
 
   const createBot = async () => { if (!newBotName.trim()) return; const bot = await api("/api/bots", { method: "POST", body: { name: newBotName.trim() } }); setNewBotName(""); refreshBots(); setSelectedBotId(bot.id); };
@@ -691,7 +749,7 @@ function Dashboard({ employee, onLogout }) {
         {selectedBot && tab === "menu" && <MenuPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "delivery" && <DeliveryPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "orders" && <OrdersPanel bot={selectedBot} api={api} />}
-        {selectedBot && tab === "employees" && <EmployeesPanel api={api} />}
+        {selectedBot && tab === "employees" && <EmployeesPanel api={api} allBots={bots} />}
       </main>
     </div>
   );

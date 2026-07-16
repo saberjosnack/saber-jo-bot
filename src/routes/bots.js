@@ -2,11 +2,12 @@ const express = require("express");
 const QRCode = require("qrcode");
 const store = require("../services/store");
 const botStore = require("../services/botStore");
-const { requireAuth, requireRole } = require("../middleware/auth");
+const { requireAuth, requireRole, requireBotAccess } = require("../middleware/auth");
 const wa = require("../services/selfHostedWhatsapp");
 
 const router = express.Router();
 router.use(requireAuth);
+router.use("/:id", requireBotAccess); // أي مسار فيه رقم بوت لازم يتأكد الموظف مسموحله فيه (المدير الكامل معفى دايماً)
 
 // ---------- قائمة البوتات ----------
 router.get("/", (req, res) => {

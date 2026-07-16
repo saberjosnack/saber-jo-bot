@@ -23,4 +23,14 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requireAuth, requireRole };
+function requireBotAccess(req, res, next) {
+  const botId = req.params.id || req.params.botId;
+  if (req.employee?.role === "owner") return next(); // المدير الكامل يشوف كل شي دايماً
+  const assigned = req.employee?.assignedBotIds || [];
+  if (!assigned.includes(botId)) {
+    return res.status(403).json({ error: "ما عندك صلاحية على هاد البوت." });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireRole, requireBotAccess };

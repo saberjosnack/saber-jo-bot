@@ -22,12 +22,15 @@ router.post("/login", async (req, res) => {
   if (!valid) return res.status(401).json({ error: "الإيميل أو كلمة المرور غلط." });
 
   const token = jwt.sign(
-    { id: employee.id, email: employee.email, role: employee.role },
+    { id: employee.id, email: employee.email, role: employee.role, assignedBotIds: employee.assignedBotIds || [] },
     env.jwtSecret,
     { expiresIn: "7d" }
   );
 
-  res.json({ token, employee: { id: employee.id, name: employee.name, role: employee.role } });
+  res.json({
+    token,
+    employee: { id: employee.id, name: employee.name, role: employee.role, assignedBotIds: employee.assignedBotIds || [] },
+  });
 });
 
 // ---------- نسيت كلمة المرور ----------
