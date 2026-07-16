@@ -3,13 +3,13 @@ const botStore = require("./botStore");
 const { handleIncomingMessage } = require("./messageHandler");
 
 const silentLogger = {
-  level: "silent",
+  level: "warn",
   trace: () => {},
   debug: () => {},
   info: () => {},
-  warn: () => {},
-  error: () => {},
-  fatal: () => {},
+  warn: (...args) => console.warn("[baileys warn]", ...args),
+  error: (...args) => console.error("[baileys error]", ...args),
+  fatal: (...args) => console.error("[baileys fatal]", ...args),
   child: () => silentLogger,
 };
 
@@ -39,6 +39,8 @@ async function startBotConnection(botId) {
     const conn = connections.get(botId);
     if (!conn) return;
     const { connection, lastDisconnect, qr } = update;
+
+    console.log(`[wa:${botId}] connection.update:`, connection || "(qr/other)", qr ? "— QR received" : "");
 
     if (qr) {
       conn.qr = qr;
