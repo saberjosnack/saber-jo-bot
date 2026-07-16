@@ -13,20 +13,26 @@ const silentLogger = {
   child: () => silentLogger,
 };
 
-// كل بوت إله اتصاله الخاص (socket)، جلسته الخاصة، ورمز QR خاص فيه — معزولين تماماً عن بعض
-const connections = new Map(); // botId -> { sock, qr, status }
+const connections = new Map();
 
 function authFolder(botId) {
   return path.join(__dirname, "..", "data", "bots", botId, "wa-auth");
 }
 
 async function startBotConnection(botId) {
-  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys");
+  const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+  } = require("@whiskeysockets/baileys");
 
   const { state, saveCreds } = await useMultiFileAuthState(authFolder(botId));
+  const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     auth: state,
+    version,
     logger: silentLogger,
     printQRInTerminal: false,
   });
@@ -41,6 +47,13 @@ async function startBotConnection(botId) {
     const { connection, lastDisconnect, qr } = update;
 
     console.log(`[wa:${botId}] connection.update:`, connection || "(qr/other)", qr ? "— QR received" : "");
+    if (connection === "close") {
+      console.log(
+        `[wa:${botId}] disconnect reason:`,
+        lastDisconnect?.error?.output?.statusCode,
+        lastDisconnect?.error?.message
+      );
+    }
 
     if (qr) {
       conn.qr = qr;
@@ -58,7 +71,7 @@ async function startBotConnection(botId) {
       conn.status = "disconnected";
       const loggedOut = lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut;
       if (!loggedOut) {
-        startBotConnection(botId); // إعادة محاولة تلقائية
+        startBotConnection(botId);
       } else {
         botStore.updateBot(botId, { status: "pending_connection" });
       }
