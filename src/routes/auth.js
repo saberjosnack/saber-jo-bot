@@ -16,13 +16,22 @@ router.post("/login", async (req, res) => {
 
   console.log("===== LOGIN DEBUG =====");
   console.log("Email entered:", email);
+  console.log("Password received:", JSON.stringify(password));
   console.log("Employees file:", JSON.stringify(employees, null, 2));
 
   const employee = employees.find((e) => e.email === email);
 
   console.log("Employee found:", employee);
 
-  if (!employee || !employee.passwordHash) {
+  if (!employee) {
+    console.log("Employee not found");
+    return res.status(401).json({ error: "الإيميل أو كلمة المرور غلط." });
+  }
+
+  console.log("Stored hash:", employee.passwordHash);
+
+  if (!employee.passwordHash) {
+    console.log("Password hash is null");
     return res.status(401).json({ error: "الإيميل أو كلمة المرور غلط." });
   }
 
@@ -43,6 +52,8 @@ router.post("/login", async (req, res) => {
     env.jwtSecret,
     { expiresIn: "7d" }
   );
+
+  console.log("LOGIN SUCCESS");
 
   res.json({
     token,
