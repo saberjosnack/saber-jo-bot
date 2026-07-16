@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const env = require("./config/env");
 
 const webhookRoutes = require("./routes/webhook");
@@ -20,6 +21,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/bots", botsRoutes);
 app.use("/qr", qrPageRoutes);
+
+// الداشبورد الحقيقي — صفحة واحدة، متصلة بالـ API فوق مباشرة
+app.use("/dashboard", express.static(path.join(__dirname, "..", "public", "dashboard")));
 
 if (env.waProvider === "selfhosted") {
   const wa = require("./services/selfHostedWhatsapp");
