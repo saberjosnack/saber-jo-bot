@@ -35,10 +35,11 @@ router.post("/employees", requireRole("owner"), async (req, res) => {
   employees.push(newEmployee);
   store.write("employees.json", employees);
 
-  const inviteLink = `${req.protocol}://${req.get("host")}/reset-password?token=${inviteToken}`;
+  const inviteLink = `${req.protocol}://${req.get("host")}/dashboard?token=${inviteToken}`;
   await sendEmployeeInviteEmail(email, inviteLink, role);
 
-  res.status(201).json({ id: newEmployee.id, name, email, role, status: "pending" });
+  // بما إنو الإيميل مش مربوط فعلياً لسا، منرجع الرابط بالرد عشان المالك يقدر يبعته يدوياً (واتساب مثلاً)
+  res.status(201).json({ id: newEmployee.id, name, email, role, status: "pending", inviteLink });
 });
 
 router.delete("/employees/:id", requireRole("owner"), (req, res) => {
