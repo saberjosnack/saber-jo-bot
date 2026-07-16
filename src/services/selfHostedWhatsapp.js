@@ -13,7 +13,8 @@ const silentLogger = {
   child: () => silentLogger,
 };
 
-const connections = new Map();
+// كل بوت إله اتصاله الخاص (socket)، جلسته الخاصة، ورمز QR خاص فيه — معزولين تماماً عن بعض
+const connections = new Map(); // botId -> { sock, qr, status }
 
 function authFolder(botId) {
   return path.join(__dirname, "..", "data", "bots", botId, "wa-auth");
@@ -35,6 +36,8 @@ async function startBotConnection(botId) {
     version,
     logger: silentLogger,
     printQRInTerminal: false,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
   });
 
   connections.set(botId, { sock, qr: null, status: "connecting" });
@@ -71,7 +74,7 @@ async function startBotConnection(botId) {
       conn.status = "disconnected";
       const loggedOut = lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut;
       if (!loggedOut) {
-        startBotConnection(botId);
+        startBotConnection(botId); // إعادة محاولة تلقائية
       } else {
         botStore.updateBot(botId, { status: "pending_connection" });
       }
