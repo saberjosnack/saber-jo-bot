@@ -1,12 +1,13 @@
 const express = require("express");
 const env = require("../config/env");
+const botStore = require("../services/botStore");
 const { handleIncomingMessage } = require("../services/messageHandler");
 const whatsapp = require("../services/whatsapp");
 
 const router = express.Router();
 
 // ---------- Meta: تأكيد الـ Webhook (مطلوب فقط لو WA_PROVIDER=cloud) ----------
-router.get("/", (req, res) => {
+router.get(["/", "/:botId"], (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
@@ -18,51 +19,48 @@ router.get("/", (req, res) => {
 });
 
 // ---------- استقبال رسائل الزباين ----------
-router.post("/", async (req, res) => {
+// المسار "/" بيروح تلقائياً لبوت "default" (توافق مع الإعداد الحالي).
+// المسار "/:botId" لأي بوت تاني، لو بدك كل بوت يربط رقمه الخاص بـ webhook مستقل.
+router.post(["/", "/:botId"], async (req, res) => {
   res.sendStatus(200); // نرد على المنصة فوراً، والمعالجة تصير بالخلفية
 
-  console.log("[webhook] رسالة وصلت، المزود:", env.waProvider);
-  console.log("[webhook] المحتوى الخام:", JSON.stringify(req.body).slice(0, 500));
+  const botId = req.params.botId || "default";
+  const bot = botStore.getBot(botId);
+
+  if (!bot) {
+    console.error(`[webhook] رسالة وصلت لبوت غير موجود: ${botId}`);
+    return;
+  }
+
+  const provider = bot.waProvider || env.waProvider;
+  console.log(`[webhook] رسالة وصلت للبوت "${bot.name}"، المزود:`, provider);
 
   try {
-    const { from, text } = extractIncomingMessage(req.body);
-    console.log("[webhook] المستخرج — from:", from, "| text:", text);
+    const { from, text } = extractIncomingMessage(req.body, provider);
 
-    if (!from || !text) {
-      console.log("[webhook] تجاهلت الرسالة (from أو text فاضيين).");
-      return;
-    }
+    if (!from || !text) return;
 
-    // ملاحظة: مزودي Green/UltraMsg/Cloud هون معدّين لبوت واحد بس ("default").
-    // تعدد البوتات بالوقت الحالي مفعّل بالكامل بس مع WA_PROVIDER=selfhosted.
-    await handleIncomingMessage("default", from, text, null, whatsapp.sendText);
-    console.log("[webhook] تمت معالجة الرسالة والرد بنجاح.");
+    await handleIncomingMessage(bot.id, from, text, null, (to, t) => whatsapp.sendText(bot, to, t));
+    console.log(`[webhook] تمت معالجة رسالة البوت "${bot.name}" بنجاح.`);
   } catch (err) {
     console.error("خطأ بمعالجة رسالة واردة:", err);
   }
 });
 
-// يفصل بنية الرسالة حسب المزود (Green API أو Meta Cloud API) عن باقي منطق الويب هوك
-function extractIncomingMessage(body) {
-  if (env.waProvider === "cloud") {
+// يفصل بنية الرسالة حسب المزود عن باقي منطق الويب هوك
+function extractIncomingMessage(body, provider) {
+  if (provider === "cloud") {
     const entry = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    return {
-      from: entry?.from,
-      text: entry?.text?.body,
-    };
+    return { from: entry?.from, text: entry?.text?.body };
   }
 
-  if (env.waProvider === "ultramsg") {
+  if (provider === "ultramsg") {
     const data = body?.data;
-    // نتجاهل رسائلنا يلي بعتناها إحنا (fromMe) عشان ما يرد البوت على نفسه
     if (!data || data.fromMe) return { from: null, text: null };
-    return {
-      from: data.from?.replace("@c.us", ""),
-      text: data.body,
-    };
+    return { from: data.from?.replace("@c.us", ""), text: data.body };
   }
 
-  if (env.waProvider === "wasender") {
+  if (provider === "wasender") {
     if (body?.event !== "messages.received") return { from: null, text: null };
     const msg = body?.data?.messages;
     if (!msg || msg.key?.fromMe) return { from: null, text: null };

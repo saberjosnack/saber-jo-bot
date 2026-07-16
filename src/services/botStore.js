@@ -46,6 +46,9 @@ function createBot(name, shareConfigFromBotId = null) {
     name,
     configId,
     status: "pending_connection", // لسا ما انربط بواتساب
+    enabled: true, // زر التشغيل/الإيقاف — true يعني البوت يرد عادي
+    waProvider: null, // null = يستخدم القيمة الافتراضية من إعدادات السيرفر (.env)
+    waCredentials: {},
     createdAt: new Date().toISOString(),
   };
 

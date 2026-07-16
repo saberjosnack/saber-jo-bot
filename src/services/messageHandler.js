@@ -21,6 +21,8 @@ async function handleIncomingMessage(botId, from, text, image, sendText) {
     return;
   }
 
+  if (bot.enabled === false) return; // البوت موقوف يدوياً من الداشبورد (زر الإيقاف)
+
   const settings = store.read(`configs/${bot.configId}/settings.json`);
   const paused = store.read(`bots/${botId}/pausedConversations.json`);
   const { stopWords, resumeWords } = settings.humanTakeover;

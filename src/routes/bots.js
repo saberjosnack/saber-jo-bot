@@ -63,6 +63,46 @@ router.get("/:id/qr", async (req, res) => {
   res.json({ status, qrImage });
 });
 
+// ---------- إيقاف/تشغيل البوت (زر واحد بالداشبورد) ----------
+router.post("/:id/stop", requireRole("owner", "orders"), (req, res) => {
+  try {
+    const updated = botStore.updateBot(req.params.id, { enabled: false });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post("/:id/start", requireRole("owner", "orders"), (req, res) => {
+  try {
+    const updated = botStore.updateBot(req.params.id, { enabled: true });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- إعدادات الربط بواتساب (المزود والمفاتيح) — بدل ما تتعدل يدوياً من Render ----------
+router.get("/:id/connection", requireRole("owner"), (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+  res.json({ waProvider: bot.waProvider, waCredentials: bot.waCredentials || {} });
+});
+
+// body: { waProvider: "wasender"|"green"|"ultramsg"|"cloud", waCredentials: {...} }
+router.put("/:id/connection", requireRole("owner"), (req, res) => {
+  try {
+    const { waProvider, waCredentials } = req.body;
+    const updated = botStore.updateBot(req.params.id, {
+      waProvider: waProvider || null,
+      waCredentials: waCredentials || {},
+    });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- منيو البوت (تبع الـ config الخاص فيه أو المشترك) ----------
 router.get("/:id/menu", (req, res) => {
   const bot = botStore.getBot(req.params.id);
