@@ -6,6 +6,7 @@ const webhookRoutes = require("./routes/webhook");
 const authRoutes = require("./routes/auth");
 const dashboardRoutes = require("./routes/dashboard");
 const botsRoutes = require("./routes/bots");
+const qrPageRoutes = require("./routes/qrPage");
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use("/webhook", webhookRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/bots", botsRoutes);
+app.use("/qr", qrPageRoutes);
 
 if (env.waProvider === "selfhosted") {
   const wa = require("./services/selfHostedWhatsapp");
