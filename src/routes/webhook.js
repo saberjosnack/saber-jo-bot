@@ -51,6 +51,16 @@ function extractIncomingMessage(body) {
     };
   }
 
+  if (env.waProvider === "wasender") {
+    if (body?.event !== "messages.received") return { from: null, text: null };
+    const msg = body?.data?.messages;
+    if (!msg || msg.key?.fromMe) return { from: null, text: null };
+    return {
+      from: msg.key?.cleanedSenderPn || msg.key?.remoteJid?.replace(/@.*/, ""),
+      text: msg.messageBody,
+    };
+  }
+
   // Green API
   const messageData = body?.messageData;
   return {

@@ -38,6 +38,28 @@ async function sendImageViaUltraMsg(to, imageUrl, caption = "") {
   });
 }
 
+async function sendViaWasender(to, text) {
+  await fetch("https://www.wasenderapi.com/api/send-message", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.wasenderApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ to, text }),
+  });
+}
+
+async function sendImageViaWasender(to, imageUrl, caption = "") {
+  await fetch("https://www.wasenderapi.com/api/send-message", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.wasenderApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ to, imageUrl, text: caption }),
+  });
+}
+
 async function sendViaCloudApi(to, text) {
   const url = `https://graph.facebook.com/v20.0/${env.whatsappPhoneNumberId}/messages`;
   await fetch(url, {
@@ -111,12 +133,14 @@ async function sendImageViaCloudApi(to, imageUrl, caption = "") {
 async function sendText(to, text) {
   if (env.waProvider === "cloud") return sendViaCloudApi(to, text);
   if (env.waProvider === "ultramsg") return sendViaUltraMsg(to, text);
+  if (env.waProvider === "wasender") return sendViaWasender(to, text);
   return sendViaGreenApi(to, text);
 }
 
 async function sendImage(to, imageUrl, caption = "") {
   if (env.waProvider === "cloud") return sendImageViaCloudApi(to, imageUrl, caption);
   if (env.waProvider === "ultramsg") return sendImageViaUltraMsg(to, imageUrl, caption);
+  if (env.waProvider === "wasender") return sendImageViaWasender(to, imageUrl, caption);
   return sendImageViaGreenApi(to, imageUrl, caption);
 }
 

@@ -14,6 +14,9 @@ module.exports = {
   ultramsgInstanceId: process.env.ULTRAMSG_INSTANCE_ID,
   ultramsgToken: process.env.ULTRAMSG_TOKEN,
 
+  wasenderApiKey: process.env.WASENDER_API_KEY,
+  wasenderWebhookSecret: process.env.WASENDER_WEBHOOK_SECRET,
+
   whatsappToken: process.env.WHATSAPP_TOKEN,
   whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
