@@ -10,6 +10,16 @@ function getBot(botId) {
   return listBots().find((b) => b.id === botId) || null;
 }
 
+// بيلاقي أي بوت مربوط بصفحة فيسبوك معينة (ماسنجر) عن طريق Page ID
+function findBotByMetaPageId(pageId) {
+  return listBots().find((b) => b.metaChannels?.messenger?.enabled && b.metaChannels.messenger.pageId === pageId) || null;
+}
+
+// بيلاقي أي بوت مربوط بحساب انستجرام بزنس معين عن طريق IG ID
+function findBotByMetaIgId(igId) {
+  return listBots().find((b) => b.metaChannels?.instagram?.enabled && b.metaChannels.instagram.igId === igId) || null;
+}
+
 function saveBots(bots) {
   store.write("bots.json", bots);
 }
@@ -50,6 +60,10 @@ function createBot(name, shareConfigFromBotId = null) {
     enabled: true, // زر التشغيل/الإيقاف — true يعني البوت يرد عادي
     waProvider: null, // null = يستخدم القيمة الافتراضية من إعدادات السيرفر (.env)
     waCredentials: {},
+    metaChannels: {
+      messenger: { enabled: false, pageId: "", pageAccessToken: "" },
+      instagram: { enabled: false, igId: "", pageAccessToken: "" },
+    },
     createdAt: new Date().toISOString(),
   };
 
@@ -114,10 +128,14 @@ function ensureDefaultBotExists() {
     enabled: true,
     waProvider: null, // بياخذ القيمة من .env تلقائياً
     waCredentials: {},
+    metaChannels: {
+      messenger: { enabled: false, pageId: "", pageAccessToken: "" },
+      instagram: { enabled: false, igId: "", pageAccessToken: "" },
+    },
     createdAt: new Date().toISOString(),
   });
   store.write("bots.json", bots);
   console.log("تم إعادة إنشاء البوت الأساسي تلقائياً (شبكة أمان).");
 }
 
-module.exports = { listBots, getBot, createBot, updateBot, deleteBot };
+module.exports = { listBots, getBot, createBot, updateBot, deleteBot, findBotByMetaPageId, findBotByMetaIgId };

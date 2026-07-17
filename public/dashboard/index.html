@@ -207,6 +207,8 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
   const [status, setStatus] = useState("connecting");
   const [conn, setConn] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [meta, setMeta] = useState(null);
+  const [savingMeta, setSavingMeta] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -217,9 +219,13 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
   }, [bot.id]);
 
   useEffect(() => { api(`/api/bots/${bot.id}/connection`).then(setConn); }, [bot.id]);
+  useEffect(() => { api(`/api/bots/${bot.id}/meta-connection`).then(setMeta); }, [bot.id]);
 
   const toggleBot = async () => { await api(`/api/bots/${bot.id}/${bot.enabled === false ? "start" : "stop"}`, { method: "POST" }); refreshBots(); };
   const saveConnection = async () => { setSaving(true); try { await api(`/api/bots/${bot.id}/connection`, { method: "PUT", body: conn }); alert("تم الحفظ ✅"); } finally { setSaving(false); } };
+  const saveMeta = async () => { setSavingMeta(true); try { await api(`/api/bots/${bot.id}/meta-connection`, { method: "PUT", body: meta }); alert("تم الحفظ ✅"); } finally { setSavingMeta(false); } };
+  const setMessenger = (patch) => setMeta({ ...meta, messenger: { ...meta.messenger, ...patch } });
+  const setInstagram = (patch) => setMeta({ ...meta, instagram: { ...meta.instagram, ...patch } });
 
   if (!conn) return null;
   const provider = conn.waProvider || "";
@@ -275,14 +281,36 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
         <button className="btn" onClick={saveConnection} disabled={saving}>{saving ? "..." : "حفظ إعدادات الربط"}</button>
       </div>
 
-      <div className="panel">
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>منصات ميتا</div>
-        <p style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 14 }}>لربط إنستغرام وماسنجر (يحتاج حساب Meta Business).</p>
-        <div className="flex gap10">
-          <button className="btn-ghost">📷 ربط إنستغرام</button>
-          <button className="btn-ghost">💬 ربط ماسنجر</button>
+      {meta && (
+        <div className="panel">
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>منصات ميتا (ماسنجر وانستجرام)</div>
+          <p style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 14 }}>لازم تجيب Page ID وPage Access Token من Meta for Developers (إعدادات Messenger API) وتحطهم هون.</p>
+
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
+            <label className="flex gap8" style={{ alignItems: "center", marginBottom: 8 }}>
+              <input type="checkbox" checked={!!meta.messenger?.enabled} onChange={(e) => setMessenger({ enabled: e.target.checked })} />
+              <span style={{ fontWeight: 600 }}>💬 ماسنجر (Messenger)</span>
+            </label>
+            {meta.messenger?.enabled && (<>
+              <div className="mb8"><label className="small">Page ID</label><input dir="ltr" value={meta.messenger?.pageId || ""} onChange={(e) => setMessenger({ pageId: e.target.value })} /></div>
+              <div className="mb14"><label className="small">Page Access Token</label><input dir="ltr" value={meta.messenger?.pageAccessToken || ""} onChange={(e) => setMessenger({ pageAccessToken: e.target.value })} /></div>
+            </>)}
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
+            <label className="flex gap8" style={{ alignItems: "center", marginBottom: 8 }}>
+              <input type="checkbox" checked={!!meta.instagram?.enabled} onChange={(e) => setInstagram({ enabled: e.target.checked })} />
+              <span style={{ fontWeight: 600 }}>📷 انستجرام (Instagram)</span>
+            </label>
+            {meta.instagram?.enabled && (<>
+              <div className="mb8"><label className="small">Instagram Business Account ID</label><input dir="ltr" value={meta.instagram?.igId || ""} onChange={(e) => setInstagram({ igId: e.target.value })} /></div>
+              <div className="mb14"><label className="small">Access Token</label><input dir="ltr" value={meta.instagram?.pageAccessToken || ""} onChange={(e) => setInstagram({ pageAccessToken: e.target.value })} /></div>
+            </>)}
+          </div>
+
+          <button className="btn" onClick={saveMeta} disabled={savingMeta}>{savingMeta ? "..." : "حفظ ربط ميتا"}</button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

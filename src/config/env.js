@@ -21,6 +21,12 @@ module.exports = {
   whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   whatsappVerifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
 
+  // ---------- ميتا (ماسنجر + انستجرام) ----------
+  // نفس رمز التحقق يلي بتحطه بصفحة Webhooks بإعدادات تطبيق ميتا
+  metaVerifyToken: process.env.META_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN,
+  // App Secret من إعدادات التطبيق الأساسية بميتا — لازم يكون موجود عشان نتحقق إن الرسايل الواردة فعلاً من ميتا
+  metaAppSecret: process.env.META_APP_SECRET,
+
   orderDestinationMode: process.env.ORDER_DESTINATION_MODE || "dashboard",
   orderDestinationTarget: process.env.ORDER_DESTINATION_TARGET || "",
 

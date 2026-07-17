@@ -104,6 +104,37 @@ router.put("/:id/connection", requireRole("owner"), (req, res) => {
   }
 });
 
+// ---------- ربط ماسنجر/انستجرام (منصات ميتا) ----------
+router.get("/:id/meta-connection", requireRole("owner"), (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+  res.json(
+    bot.metaChannels || {
+      messenger: { enabled: false, pageId: "", pageAccessToken: "" },
+      instagram: { enabled: false, igId: "", pageAccessToken: "" },
+    }
+  );
+});
+
+// body: { messenger?: {enabled, pageId, pageAccessToken}, instagram?: {enabled, igId, pageAccessToken} }
+router.put("/:id/meta-connection", requireRole("owner"), (req, res) => {
+  try {
+    const bot = botStore.getBot(req.params.id);
+    if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+
+    const current = bot.metaChannels || {};
+    const updated = botStore.updateBot(req.params.id, {
+      metaChannels: {
+        messenger: { ...current.messenger, ...req.body.messenger },
+        instagram: { ...current.instagram, ...req.body.instagram },
+      },
+    });
+    res.json(updated.metaChannels);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- منيو البوت (تبع الـ config الخاص فيه أو المشترك) ----------
 router.get("/:id/menu", (req, res) => {
   const bot = botStore.getBot(req.params.id);
