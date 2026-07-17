@@ -30,6 +30,9 @@ module.exports = {
   metaAppId: process.env.META_APP_ID,
   // رابط السيرفر المنشور فعلياً (بدون / بالآخر) — لازم يطابق بالضبط الـ Redirect URI المسجل بإعدادات فيسبوك Login
   appBaseUrl: (process.env.APP_BASE_URL || "https://saber-jo-bot.onrender.com").replace(/\/$/, ""),
+  // معرف حساب الأعمال (Business Manager) — اختياري. بعض الصفحات المدارة عن طريق Business Manager
+  // ما بترجع من /me/accounts العادي، فبنستخدم هاد المعرف كطريقة إضافية نجيب فيها كل صفحات حساب الأعمال.
+  metaBusinessId: process.env.META_BUSINESS_ID || null,
 
   orderDestinationMode: process.env.ORDER_DESTINATION_MODE || "dashboard",
   orderDestinationTarget: process.env.ORDER_DESTINATION_TARGET || "",

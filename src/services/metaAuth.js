@@ -14,6 +14,7 @@ const OAUTH_SCOPES = [
   "pages_read_engagement",
   "instagram_basic",
   "instagram_manage_messages",
+  "business_management", // لازم عشان نقدر نجيب صفحات مربوطة بحساب أعمال (Business Manager) مش بس صفحات شخصية
 ].join(",");
 
 function callbackUrl() {
@@ -76,24 +77,54 @@ async function exchangeCodeForPages(code) {
   // ملاحظة: /me/accounts بترجع النتايج بصفحات (pagination) — لو الحساب عم يدير صفحات كتيرة
   // (متل هاد الحساب يلي عنده عشرات الصفحات لأعمال مختلفة)، الصفحة يلي بدنا ياها ممكن تكون
   // مش بأول دفعة نتايج. لازم نلف على كل صفحات النتايج (paging.next) لحتى نجمعهم كلهم.
-  let pages = [];
-  let nextUrl =
+  const meAccountsPages = await fetchAllPages(
     `https://graph.facebook.com/${GRAPH_VERSION}/me/accounts?` +
-    new URLSearchParams({
-      fields: "id,name,access_token,instagram_business_account{id,username}",
-      limit: "100",
-      access_token: userToken,
-    });
+      new URLSearchParams({
+        fields: "id,name,access_token,instagram_business_account{id,username}",
+        limit: "100",
+        access_token: userToken,
+      })
+  );
 
-  while (nextUrl) {
-    const pagesRes = await fetch(nextUrl);
-    const pagesData = await pagesRes.json();
-    if (!Array.isArray(pagesData.data)) throw new Error("فشل جلب الصفحات: " + JSON.stringify(pagesData));
-    pages = pages.concat(pagesData.data);
-    nextUrl = pagesData.paging?.next || null;
+  let pages = meAccountsPages;
+
+  // بعض الصفحات المدارة عن طريق حساب أعمال (Business Manager) — متل صفحات مربوطة "بالتعيين"
+  // كموظف على مستوى الأعمال مش عن طريق صلاحيات الصفحة الكلاسيكية — ما بترجع من /me/accounts
+  // مهما لفينا على كل صفحاته. إذا محدد META_BUSINESS_ID، منجيبهم كمان من نقطة الأعمال ومنضمهم.
+  if (env.metaBusinessId) {
+    try {
+      const businessPages = await fetchAllPages(
+        `https://graph.facebook.com/${GRAPH_VERSION}/${env.metaBusinessId}/owned_pages?` +
+          new URLSearchParams({
+            fields: "id,name,access_token,instagram_business_account{id,username}",
+            limit: "100",
+            access_token: userToken,
+          })
+      );
+      const existingIds = new Set(pages.map((p) => p.id));
+      for (const p of businessPages) {
+        if (!existingIds.has(p.id)) pages.push(p);
+      }
+    } catch (err) {
+      console.error("[meta-auth] تعذّر جلب صفحات حساب الأعمال (owned_pages) — رح نكمل بس بصفحات /me/accounts:", err.message);
+    }
   }
 
   return pages;
+}
+
+// يلف على كل صفحات النتايج (paging.next) لأي رابط Graph API ويرجع مصفوفة واحدة مجمّعة
+async function fetchAllPages(firstUrl) {
+  let results = [];
+  let nextUrl = firstUrl;
+  while (nextUrl) {
+    const res = await fetch(nextUrl);
+    const data = await res.json();
+    if (!Array.isArray(data.data)) throw new Error("فشل جلب الصفحات: " + JSON.stringify(data));
+    results = results.concat(data.data);
+    nextUrl = data.paging?.next || null;
+  }
+  return results;
 }
 
 function savePendingPages(botId, pages) {
