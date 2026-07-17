@@ -2,6 +2,7 @@ const express = require("express");
 const QRCode = require("qrcode");
 const store = require("../services/store");
 const botStore = require("../services/botStore");
+const metaAuth = require("../services/metaAuth");
 const { requireAuth, requireRole, requireBotAccess } = require("../middleware/auth");
 const wa = require("../services/selfHostedWhatsapp");
 
@@ -127,6 +128,58 @@ router.put("/:id/meta-connection", requireRole("owner"), (req, res) => {
       metaChannels: {
         messenger: { ...current.messenger, ...req.body.messenger },
         instagram: { ...current.instagram, ...req.body.instagram },
+      },
+    });
+    res.json(updated.metaChannels);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- تسجيل الدخول بفيسبوك (بديل عن لصق التوكنز يدوياً) ----------
+
+// الخطوة 1: الداشبورد بيطلب رابط تسجيل الدخول، وبيوجه المتصفح كامل إلو (window.location)
+router.get("/:id/facebook/login-url", requireRole("owner"), (req, res) => {
+  try {
+    res.json({ url: metaAuth.buildLoginUrl(req.params.id) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// الخطوة 2 (بعد ما فيسبوك يرجّع المستخدم عن طريق /api/meta/facebook-callback):
+// الداشبورد بيسأل شو الصفحات يلي طلعت جاهزة يختار منها
+router.get("/:id/facebook/pages", requireRole("owner"), (req, res) => {
+  const pages = metaAuth.getPendingPages(req.params.id).map((p) => ({
+    id: p.id,
+    name: p.name,
+    hasInstagram: !!p.instagram_business_account,
+    instagramUsername: p.instagram_business_account?.username || null,
+  }));
+  res.json(pages);
+});
+
+// الخطوة 3: صاحب البوت بيختار صفحة معينة، ومنحفظ توكناتها تلقائياً (بدون ما يشوفها أو يلصقها)
+// body: { pageId: string }
+router.post("/:id/facebook/select-page", requireRole("owner"), (req, res) => {
+  try {
+    const { pageId } = req.body;
+    const page = metaAuth.consumeSelectedPage(req.params.id, pageId);
+    if (!page) {
+      return res.status(400).json({ error: "الصفحة مش موجودة أو انتهت صلاحية الجلسة — أعد تسجيل الدخول بفيسبوك من جديد." });
+    }
+
+    const updated = botStore.updateBot(req.params.id, {
+      metaChannels: {
+        messenger: { enabled: true, pageId: page.id, pageName: page.name, pageAccessToken: page.access_token },
+        instagram: page.instagram_business_account
+          ? {
+              enabled: true,
+              igId: page.instagram_business_account.id,
+              igUsername: page.instagram_business_account.username || "",
+              pageAccessToken: page.access_token,
+            }
+          : { enabled: false, igId: "", igUsername: "", pageAccessToken: "" },
       },
     });
     res.json(updated.metaChannels);

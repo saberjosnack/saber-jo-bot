@@ -209,6 +209,10 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
   const [saving, setSaving] = useState(false);
   const [meta, setMeta] = useState(null);
   const [savingMeta, setSavingMeta] = useState(false);
+  const [fbPages, setFbPages] = useState(null); // null = ما في اختيار معلّق، array = في صفحات جاهزة يلي المستخدم يختار منها
+  const [fbLoading, setFbLoading] = useState(false);
+  const [fbError, setFbError] = useState("");
+  const [showManual, setShowManual] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -221,11 +225,51 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
   useEffect(() => { api(`/api/bots/${bot.id}/connection`).then(setConn); }, [bot.id]);
   useEffect(() => { api(`/api/bots/${bot.id}/meta-connection`).then(setMeta); }, [bot.id]);
 
+  // لو رجعنا من فيسبوك لتوّنا (metaConnected=<botId> أو metaError=...) نجيب قائمة الصفحات المعلّقة أو نعرض الخطأ
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connectedBotId = params.get("metaConnected");
+    const err = params.get("metaError");
+    if (err) {
+      setFbError("صار خطأ أثناء تسجيل الدخول بفيسبوك: " + err);
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+    if (connectedBotId === bot.id) {
+      api(`/api/bots/${bot.id}/facebook/pages`).then((pages) => setFbPages(pages));
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [bot.id]);
+
   const toggleBot = async () => { await api(`/api/bots/${bot.id}/${bot.enabled === false ? "start" : "stop"}`, { method: "POST" }); refreshBots(); };
   const saveConnection = async () => { setSaving(true); try { await api(`/api/bots/${bot.id}/connection`, { method: "PUT", body: conn }); alert("تم الحفظ ✅"); } finally { setSaving(false); } };
   const saveMeta = async () => { setSavingMeta(true); try { await api(`/api/bots/${bot.id}/meta-connection`, { method: "PUT", body: meta }); alert("تم الحفظ ✅"); } finally { setSavingMeta(false); } };
   const setMessenger = (patch) => setMeta({ ...meta, messenger: { ...meta.messenger, ...patch } });
   const setInstagram = (patch) => setMeta({ ...meta, instagram: { ...meta.instagram, ...patch } });
+
+  const loginWithFacebook = async () => {
+    setFbLoading(true); setFbError("");
+    try {
+      const { url } = await api(`/api/bots/${bot.id}/facebook/login-url`);
+      window.location.href = url; // تنقل صفحة كامل لموافقة فيسبوك، وبيرجعنا هون تلقائياً بعدها
+    } catch (e) {
+      setFbError(e.message);
+      setFbLoading(false);
+    }
+  };
+
+  const pickPage = async (pageId) => {
+    setFbLoading(true); setFbError("");
+    try {
+      const updated = await api(`/api/bots/${bot.id}/facebook/select-page`, { method: "POST", body: { pageId } });
+      setMeta(updated);
+      setFbPages(null);
+    } catch (e) {
+      setFbError(e.message);
+    } finally {
+      setFbLoading(false);
+    }
+  };
 
   if (!conn) return null;
   const provider = conn.waProvider || "";
@@ -284,31 +328,83 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
       {meta && (
         <div className="panel">
           <div style={{ fontWeight: 700, marginBottom: 4 }}>منصات ميتا (ماسنجر وانستجرام)</div>
-          <p style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 14 }}>لازم تجيب Page ID وPage Access Token من Meta for Developers (إعدادات Messenger API) وتحطهم هون.</p>
+          <p style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 14 }}>سجل دخول بحساب فيسبوك تبع صفحتك واختر الصفحة من القائمة — بيتحفظ كل شي تلقائياً بدون ما تحتاج تلصق أي توكن.</p>
 
-          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
-            <label className="flex gap8" style={{ alignItems: "center", marginBottom: 8 }}>
-              <input type="checkbox" checked={!!meta.messenger?.enabled} onChange={(e) => setMessenger({ enabled: e.target.checked })} />
-              <span style={{ fontWeight: 600 }}>💬 ماسنجر (Messenger)</span>
-            </label>
-            {meta.messenger?.enabled && (<>
-              <div className="mb8"><label className="small">Page ID</label><input dir="ltr" value={meta.messenger?.pageId || ""} onChange={(e) => setMessenger({ pageId: e.target.value })} /></div>
-              <div className="mb14"><label className="small">Page Access Token</label><input dir="ltr" value={meta.messenger?.pageAccessToken || ""} onChange={(e) => setMessenger({ pageAccessToken: e.target.value })} /></div>
-            </>)}
+          {fbError && <div style={{ background: "#fdecea", color: "#611a15", padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 12 }}>{fbError}</div>}
+
+          {!fbPages && (
+            <div style={{ marginBottom: 14 }}>
+              <button className="btn" onClick={loginWithFacebook} disabled={fbLoading}>
+                {fbLoading ? "..." : "🔵 تسجيل الدخول عبر فيسبوك"}
+              </button>
+            </div>
+          )}
+
+          {fbPages && (
+            <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>اختر الصفحة يلي بدك تربطها بهاد البوت:</div>
+              {fbPages.length === 0 && <p style={{ fontSize: 13, color: "var(--ink-dim)" }}>ما لقينا أي صفحة فيسبوك أنت أدمن فيها بهاد الحساب.</p>}
+              <div className="flexcol gap8">
+                {fbPages.map((p) => (
+                  <div key={p.id} className="flex" style={{ justifyContent: "space-between", alignItems: "center", border: "1px solid var(--line)", borderRadius: 6, padding: "8px 10px" }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
+                      {p.hasInstagram && <div style={{ fontSize: 11, color: "var(--ink-dim)" }}>📷 مربوطة بحساب انستجرام: {p.instagramUsername || p.id}</div>}
+                    </div>
+                    <button className="btn" disabled={fbLoading} onClick={() => pickPage(p.id)}>ربط هاي الصفحة</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 6 }}>
+            <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <span className="flex gap8" style={{ alignItems: "center" }}>
+                <span style={{ fontWeight: 600 }}>💬 ماسنجر</span>
+                <span className={`tag ${meta.messenger?.enabled ? "tag-on" : "tag-off"}`} style={{ fontSize: 10 }}>{meta.messenger?.enabled ? "متصل" : "غير متصل"}</span>
+              </span>
+              {meta.messenger?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.messenger?.pageName || meta.messenger?.pageId}</span>}
+            </div>
+            <div className="flex" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+              <span className="flex gap8" style={{ alignItems: "center" }}>
+                <span style={{ fontWeight: 600 }}>📷 انستجرام</span>
+                <span className={`tag ${meta.instagram?.enabled ? "tag-on" : "tag-off"}`} style={{ fontSize: 10 }}>{meta.instagram?.enabled ? "متصل" : "غير متصل"}</span>
+              </span>
+              {meta.instagram?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.instagram?.igUsername || meta.instagram?.igId}</span>}
+            </div>
           </div>
 
-          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
-            <label className="flex gap8" style={{ alignItems: "center", marginBottom: 8 }}>
-              <input type="checkbox" checked={!!meta.instagram?.enabled} onChange={(e) => setInstagram({ enabled: e.target.checked })} />
-              <span style={{ fontWeight: 600 }}>📷 انستجرام (Instagram)</span>
-            </label>
-            {meta.instagram?.enabled && (<>
-              <div className="mb8"><label className="small">Instagram Business Account ID</label><input dir="ltr" value={meta.instagram?.igId || ""} onChange={(e) => setInstagram({ igId: e.target.value })} /></div>
-              <div className="mb14"><label className="small">Access Token</label><input dir="ltr" value={meta.instagram?.pageAccessToken || ""} onChange={(e) => setInstagram({ pageAccessToken: e.target.value })} /></div>
-            </>)}
-          </div>
+          <details style={{ marginTop: 10 }}>
+            <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--ink-dim)" }} onClick={(e) => { e.preventDefault(); setShowManual(!showManual); }}>
+              إعداد يدوي متقدم (لصق Page ID / Token يدوياً)
+            </summary>
+            {showManual && (<div style={{ marginTop: 10 }}>
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
+                <label className="flex gap8" style={{ alignItems: "center", marginBottom: 8 }}>
+                  <input type="checkbox" checked={!!meta.messenger?.enabled} onChange={(e) => setMessenger({ enabled: e.target.checked })} />
+                  <span style={{ fontWeight: 600 }}>💬 ماسنجر (Messenger)</span>
+                </label>
+                {meta.messenger?.enabled && (<>
+                  <div className="mb8"><label className="small">Page ID</label><input dir="ltr" value={meta.messenger?.pageId || ""} onChange={(e) => setMessenger({ pageId: e.target.value })} /></div>
+                  <div className="mb14"><label className="small">Page Access Token</label><input dir="ltr" value={meta.messenger?.pageAccessToken || ""} onChange={(e) => setMessenger({ pageAccessToken: e.target.value })} /></div>
+                </>)}
+              </div>
 
-          <button className="btn" onClick={saveMeta} disabled={savingMeta}>{savingMeta ? "..." : "حفظ ربط ميتا"}</button>
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginBottom: 14 }}>
+                <label className="flex gap8" style={{ alignItems: "center", marginBottom: 8 }}>
+                  <input type="checkbox" checked={!!meta.instagram?.enabled} onChange={(e) => setInstagram({ enabled: e.target.checked })} />
+                  <span style={{ fontWeight: 600 }}>📷 انستجرام (Instagram)</span>
+                </label>
+                {meta.instagram?.enabled && (<>
+                  <div className="mb8"><label className="small">Instagram Business Account ID</label><input dir="ltr" value={meta.instagram?.igId || ""} onChange={(e) => setInstagram({ igId: e.target.value })} /></div>
+                  <div className="mb14"><label className="small">Access Token</label><input dir="ltr" value={meta.instagram?.pageAccessToken || ""} onChange={(e) => setInstagram({ pageAccessToken: e.target.value })} /></div>
+                </>)}
+              </div>
+
+              <button className="btn" onClick={saveMeta} disabled={savingMeta}>{savingMeta ? "..." : "حفظ ربط ميتا"}</button>
+            </div>)}
+          </details>
         </div>
       )}
     </div>
@@ -732,6 +828,16 @@ function Dashboard({ employee, onLogout }) {
     setSelectedBotId((cur) => cur || (visible[0] && visible[0].id));
   }); }, [employee]);
   useEffect(() => { refreshBots(); }, []);
+
+  // لو راجعين من "تسجيل الدخول بفيسبوك" (بعد ما ميتا وجّهت المتصفح لهون)، نفتح البوت الصح على تبويب الربط تلقائياً
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const metaConnected = params.get("metaConnected");
+    if (metaConnected) {
+      setSelectedBotId(metaConnected);
+      setTab("connections");
+    }
+  }, []);
 
   const createBot = async () => { if (!newBotName.trim()) return; const bot = await api("/api/bots", { method: "POST", body: { name: newBotName.trim() } }); setNewBotName(""); refreshBots(); setSelectedBotId(bot.id); };
   const selectedBot = bots.find((b) => b.id === selectedBotId);

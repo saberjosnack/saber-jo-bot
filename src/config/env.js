@@ -26,6 +26,10 @@ module.exports = {
   metaVerifyToken: process.env.META_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN,
   // App Secret من إعدادات التطبيق الأساسية بميتا — لازم يكون موجود عشان نتحقق إن الرسايل الواردة فعلاً من ميتا
   metaAppSecret: process.env.META_APP_SECRET,
+  // App ID (مش سري، بس لازم نعرفه عشان نبني رابط "تسجيل الدخول بفيسبوك")
+  metaAppId: process.env.META_APP_ID,
+  // رابط السيرفر المنشور فعلياً (بدون / بالآخر) — لازم يطابق بالضبط الـ Redirect URI المسجل بإعدادات فيسبوك Login
+  appBaseUrl: (process.env.APP_BASE_URL || "https://saber-jo-bot.onrender.com").replace(/\/$/, ""),
 
   orderDestinationMode: process.env.ORDER_DESTINATION_MODE || "dashboard",
   orderDestinationTarget: process.env.ORDER_DESTINATION_TARGET || "",

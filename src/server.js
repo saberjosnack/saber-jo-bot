@@ -5,6 +5,7 @@ const env = require("./config/env");
 
 const webhookRoutes = require("./routes/webhook");
 const metaWebhookRoutes = require("./routes/metaWebhook");
+const metaAuthCallbackRoutes = require("./routes/metaAuthCallback");
 const authRoutes = require("./routes/auth");
 const dashboardRoutes = require("./routes/dashboard");
 const botsRoutes = require("./routes/bots");
@@ -21,6 +22,8 @@ app.get("/", (req, res) => res.send("Saber Jo Snack bot API شغال ✅"));
 // لازم ميتا (facebook) تنسجل قبل واتساب، وإلا مسار "/webhook/:botId" تبع واتساب بياخذها غلط (botId="facebook")
 app.use("/webhook/facebook", metaWebhookRoutes);
 app.use("/webhook", webhookRoutes);
+// رجوع فيسبوك بعد "تسجيل الدخول" (OAuth) — لازم يكون بدون تسجيل دخول للداشبورد لأنو فيسبوك بيوجه المتصفح مباشرة
+app.use("/api/meta", metaAuthCallbackRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/bots", botsRoutes);
