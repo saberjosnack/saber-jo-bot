@@ -475,6 +475,7 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
 const TONES = ["ودود","احترافي","مقنع","داعم","حازم","هادئ","متحمس","ذكي","متعاطف","عفوي"];
 const EMOJI_LEVELS = [["high","كثير"],["mid","متوازن"],["low","قليل"],["none","بدون"]];
 const SALES_POWER = [["light","خفيف","يسجل الطلب بس"],["mid","متوسط","يقترح أحياناً"],["strong","قوي","يزيد قيمة كل طلب"]];
+const DIALECTS = ["الأردن","العراق","مصر","سوريا","لبنان","فلسطين","الخليج","عام (فصحى مبسطة)"];
 
 function StylePanel({ bot, api }) {
   const [s, setS] = useState(null);
@@ -494,6 +495,12 @@ function StylePanel({ bot, api }) {
             <div style={{ flex: 1 }}><label className="small">فتح</label><input type="time" value={s.identity.openTime} onChange={(e) => setS({ ...s, identity: { ...s.identity, openTime: e.target.value } })} /></div>
             <div style={{ flex: 1 }}><label className="small">إغلاق</label><input type="time" value={s.identity.closeTime} onChange={(e) => setS({ ...s, identity: { ...s.identity, closeTime: e.target.value } })} /></div>
           </div>
+        </div>
+        <div className="mb14">
+          <label className="small">لهجة الردود (نص)</label>
+          <select value={s.identity.dialect || "الأردن"} onChange={(e) => setS({ ...s, identity: { ...s.identity, dialect: e.target.value } })}>
+            {DIALECTS.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
         <label className="small">قوة البيع</label>
         <div className="grid3">

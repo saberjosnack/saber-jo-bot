@@ -30,8 +30,9 @@ async function generateReply(history, userMessage, image = null, configId = "def
     body: JSON.stringify({
       model: env.aiModel,
       max_tokens: 350,
-      // درجة حرارة واطية = ردود أكثر ثباتاً والتزاماً بالمنيو، وأقل عشوائية/اختلاق
-      temperature: 0.2,
+      // درجة حرارة متوسطة: كفاية عشان الصياغة تختلف من رد لرد (ما يبين البوت مكرر/آلي قدام ميتا)،
+      // بس القواعد الصارمة بالبرومبت (منع اختلاق أسعار/أصناف) بتضل مطبقة بغض النظر عن الحرارة.
+      temperature: 0.45,
       // الجزء الثابت (منيو، توصيل، حواجز) بيتخزن مؤقتاً — كل رسالة بعدها بتدفع 10% بس من سعره
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages,
