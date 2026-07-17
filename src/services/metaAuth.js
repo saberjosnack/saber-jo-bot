@@ -100,12 +100,13 @@ function getPendingPages(botId) {
   return entry.pages;
 }
 
-// بيرجع الصفحة المختارة كاملة (مع التوكن) وبيمسحها من التخزين المؤقت بنفس الوقت
+// بيرجع الصفحة المختارة كاملة (مع التوكن). ما بنمسح باقي الصفحات المعلّقة —
+// لو المستخدم اختار أكتر من صفحة بشاشة فيسبوك، لازم تضل باقي الصفحات متاحة
+// لين تنتهي صلاحيتها (TTL) أو يسجل دخول من جديد، عشان ما تضيع لو غلط بالاختيار.
 function consumeSelectedPage(botId, pageId) {
   const pages = getPendingPages(botId);
   const page = pages.find((p) => p.id === pageId);
   if (!page) return null;
-  pendingPagesByBot.delete(botId);
   return page;
 }
 

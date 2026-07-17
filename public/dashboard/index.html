@@ -258,6 +258,17 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
     }
   };
 
+  const unlinkMessenger = async () => {
+    if (!confirm('متأكد إنك بدك تلغي ربط ماسنجر عن هاد البوت؟')) return;
+    const updated = await api(`/api/bots/${bot.id}/meta-connection`, { method: "PUT", body: { messenger: { enabled: false, pageId: "", pageName: "", pageAccessToken: "" } } });
+    setMeta(updated);
+  };
+  const unlinkInstagram = async () => {
+    if (!confirm('متأكد إنك بدك تلغي ربط انستجرام عن هاد البوت؟')) return;
+    const updated = await api(`/api/bots/${bot.id}/meta-connection`, { method: "PUT", body: { instagram: { enabled: false, igId: "", igUsername: "", pageAccessToken: "" } } });
+    setMeta(updated);
+  };
+
   const pickPage = async (pageId) => {
     setFbLoading(true); setFbError("");
     try {
@@ -355,9 +366,17 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
           {fbError && <div style={{ background: "#fdecea", color: "#611a15", padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 12 }}>{fbError}</div>}
 
           {!fbPages && (
-            <div style={{ marginBottom: 14 }}>
+            <div className="flex gap8" style={{ marginBottom: 14, alignItems: "center" }}>
               <button className="btn" onClick={loginWithFacebook} disabled={fbLoading}>
                 {fbLoading ? "..." : "🔵 تسجيل الدخول عبر فيسبوك"}
+              </button>
+              <button
+                className="btn-ghost"
+                style={{ fontSize: 12 }}
+                disabled={fbLoading}
+                onClick={async () => { setFbLoading(true); try { const pages = await api(`/api/bots/${bot.id}/facebook/pages`); setFbPages(pages); } finally { setFbLoading(false); } }}
+              >
+                عرض الصفحات من آخر تسجيل دخول
               </button>
             </div>
           )}
@@ -386,14 +405,20 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
                 <span style={{ fontWeight: 600 }}>💬 ماسنجر</span>
                 <span className={`tag ${meta.messenger?.enabled ? "tag-on" : "tag-off"}`} style={{ fontSize: 10 }}>{meta.messenger?.enabled ? "متصل" : "غير متصل"}</span>
               </span>
-              {meta.messenger?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.messenger?.pageName || meta.messenger?.pageId}</span>}
+              <span className="flex gap8" style={{ alignItems: "center" }}>
+                {meta.messenger?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.messenger?.pageName || meta.messenger?.pageId}</span>}
+                {meta.messenger?.enabled && <button className="btn-ghost" style={{ fontSize: 11, padding: "3px 8px" }} onClick={unlinkMessenger}>إلغاء الربط</button>}
+              </span>
             </div>
             <div className="flex" style={{ justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
               <span className="flex gap8" style={{ alignItems: "center" }}>
                 <span style={{ fontWeight: 600 }}>📷 انستجرام</span>
                 <span className={`tag ${meta.instagram?.enabled ? "tag-on" : "tag-off"}`} style={{ fontSize: 10 }}>{meta.instagram?.enabled ? "متصل" : "غير متصل"}</span>
               </span>
-              {meta.instagram?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.instagram?.igUsername || meta.instagram?.igId}</span>}
+              <span className="flex gap8" style={{ alignItems: "center" }}>
+                {meta.instagram?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.instagram?.igUsername || meta.instagram?.igId}</span>}
+                {meta.instagram?.enabled && <button className="btn-ghost" style={{ fontSize: 11, padding: "3px 8px" }} onClick={unlinkInstagram}>إلغاء الربط</button>}
+              </span>
             </div>
           </div>
 
