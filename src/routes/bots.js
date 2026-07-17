@@ -150,7 +150,9 @@ router.get("/:id/facebook/login-url", requireRole("owner"), (req, res) => {
 // الخطوة 2 (بعد ما فيسبوك يرجّع المستخدم عن طريق /api/meta/facebook-callback):
 // الداشبورد بيسأل شو الصفحات يلي طلعت جاهزة يختار منها
 router.get("/:id/facebook/pages", requireRole("owner"), (req, res) => {
-  const pages = metaAuth.getPendingPages(req.params.id).map((p) => ({
+  const raw = metaAuth.getPendingPages(req.params.id);
+  console.log(`[meta-auth] الداشبورد طلب صفحات البوت ${req.params.id} — لقينا ${raw.length}.`);
+  const pages = raw.map((p) => ({
     id: p.id,
     name: p.name,
     hasInstagram: !!p.instagram_business_account,

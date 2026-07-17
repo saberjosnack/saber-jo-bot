@@ -286,14 +286,36 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
         <button className={bot.enabled === false ? "btn" : "btn-danger"} onClick={toggleBot}>{bot.enabled === false ? "▶ تشغيل البوت" : "⏸ إيقاف البوت"}</button>
       </div>
 
-      {provider === "selfhosted" && (
-        <div className="panel" style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: 700, marginBottom: 12 }}>ربط واتساب (اتصال مباشر)</div>
-          {status === "connected" ? <div style={{ color: "var(--olive)" }}>متصل بواتساب ✅</div>
-            : qr ? (<div><img src={qr} style={{ width: 220, height: 220 }} /><p style={{ fontSize: 13, color: "var(--ink-dim)" }}>واتساب ← الأجهزة المرتبطة ← ربط جهاز</p></div>)
-            : <p style={{ color: "var(--ink-dim)" }}>عم نجهز رمز QR...</p>}
-        </div>
-      )}
+      <div className="panel" style={{ textAlign: "center" }}>
+        <div style={{ fontWeight: 700, marginBottom: 12 }}>ربط واتساب مباشر (رمز QR)</div>
+        {provider !== "selfhosted" ? (
+          <div>
+            <p style={{ fontSize: 13, color: "var(--ink-dim)", marginBottom: 12 }}>
+              هاد ربط مباشر برقم واتساب من جوالك (متل واتساب ويب) بدون أي API خارجي أو اشتراك. لما تفعله بيصير هو طريقة إرسال واستقبال الرسائل لهاد البوت.
+            </p>
+            <button
+              className="btn"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  const updated = { ...conn, waProvider: "selfhosted" };
+                  await api(`/api/bots/${bot.id}/connection`, { method: "PUT", body: updated });
+                  setConn(updated);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              {saving ? "..." : "فعّل الربط المباشر (QR)"}
+            </button>
+          </div>
+        ) : (
+          status === "connected" ? <div style={{ color: "var(--olive)" }}>متصل بواتساب ✅</div>
+            : qr ? (<div><img src={qr} style={{ width: 220, height: 220 }} /><p style={{ fontSize: 13, color: "var(--ink-dim)" }}>افتح واتساب على جوالك ← الأجهزة المرتبطة ← ربط جهاز، وامسح الرمز.</p></div>)
+            : <p style={{ color: "var(--ink-dim)" }}>عم نجهز رمز QR...</p>
+        )}
+      </div>
 
       <div className="panel">
         <div style={{ fontWeight: 700, marginBottom: 4 }}>إعدادات الربط</div>
@@ -840,6 +862,12 @@ function Dashboard({ employee, onLogout }) {
   }, []);
 
   const createBot = async () => { if (!newBotName.trim()) return; const bot = await api("/api/bots", { method: "POST", body: { name: newBotName.trim() } }); setNewBotName(""); refreshBots(); setSelectedBotId(bot.id); };
+  const deleteBot = async (bot) => {
+    if (!confirm(`متأكد إنك بدك تحذف بوت "${bot.name}"؟ رح ينحذف نهائياً مع كل إعداداته وطلباته — ما بينرجع.`)) return;
+    await api(`/api/bots/${bot.id}`, { method: "DELETE" });
+    if (selectedBotId === bot.id) setSelectedBotId(null);
+    refreshBots();
+  };
   const selectedBot = bots.find((b) => b.id === selectedBotId);
 
   const tabs = [
@@ -860,7 +888,18 @@ function Dashboard({ employee, onLogout }) {
           {bots.map((b) => (
             <div key={b.id} onClick={() => setSelectedBotId(b.id)} className="flex" style={{ justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 6, cursor: "pointer", marginBottom: 4, background: b.id === selectedBotId ? "var(--panel-2)" : "transparent" }}>
               <span style={{ fontSize: 13 }}>{b.name}</span>
-              <span className={`tag ${b.enabled === false ? "tag-off" : "tag-on"}`} style={{ fontSize: 10 }}>{b.enabled === false ? "موقوف" : "شغال"}</span>
+              <span className="flex gap8" style={{ alignItems: "center" }}>
+                <span className={`tag ${b.enabled === false ? "tag-off" : "tag-on"}`} style={{ fontSize: 10 }}>{b.enabled === false ? "موقوف" : "شغال"}</span>
+                {employee?.role === "owner" && (
+                  <span
+                    title="حذف البوت"
+                    onClick={(e) => { e.stopPropagation(); deleteBot(b); }}
+                    style={{ fontSize: 13, color: "var(--ink-dim)", padding: "0 4px" }}
+                  >
+                    🗑
+                  </span>
+                )}
+              </span>
             </div>
           ))}
           {employee?.role === "owner" && (
