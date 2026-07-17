@@ -272,9 +272,22 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
   const pickPage = async (pageId) => {
     setFbLoading(true); setFbError("");
     try {
-      const updated = await api(`/api/bots/${bot.id}/facebook/select-page`, { method: "POST", body: { pageId } });
+      const { webhookSubscribeWarning, ...updated } = await api(`/api/bots/${bot.id}/facebook/select-page`, { method: "POST", body: { pageId } });
       setMeta(updated);
       setFbPages(null);
+      if (webhookSubscribeWarning) setFbError(webhookSubscribeWarning);
+    } catch (e) {
+      setFbError(e.message);
+    } finally {
+      setFbLoading(false);
+    }
+  };
+
+  const resubscribeWebhook = async () => {
+    setFbLoading(true); setFbError("");
+    try {
+      await api(`/api/bots/${bot.id}/facebook/resubscribe-webhook`, { method: "POST" });
+      alert("تم تفعيل استقبال الرسائل من جديد ✅");
     } catch (e) {
       setFbError(e.message);
     } finally {
@@ -407,6 +420,7 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
               </span>
               <span className="flex gap8" style={{ alignItems: "center" }}>
                 {meta.messenger?.enabled && <span style={{ fontSize: 12, color: "var(--ink-dim)" }}>{meta.messenger?.pageName || meta.messenger?.pageId}</span>}
+                {meta.messenger?.enabled && <button className="btn-ghost" style={{ fontSize: 11, padding: "3px 8px" }} disabled={fbLoading} onClick={resubscribeWebhook}>إعادة تفعيل استقبال الرسائل</button>}
                 {meta.messenger?.enabled && <button className="btn-ghost" style={{ fontSize: 11, padding: "3px 8px" }} onClick={unlinkMessenger}>إلغاء الربط</button>}
               </span>
             </div>

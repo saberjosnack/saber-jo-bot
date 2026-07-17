@@ -163,7 +163,7 @@ router.get("/:id/facebook/pages", requireRole("owner"), (req, res) => {
 
 // الخطوة 3: صاحب البوت بيختار صفحة معينة، ومنحفظ توكناتها تلقائياً (بدون ما يشوفها أو يلصقها)
 // body: { pageId: string }
-router.post("/:id/facebook/select-page", requireRole("owner"), (req, res) => {
+router.post("/:id/facebook/select-page", requireRole("owner"), async (req, res) => {
   try {
     const { pageId } = req.body;
     const page = metaAuth.consumeSelectedPage(req.params.id, pageId);
@@ -184,7 +184,32 @@ router.post("/:id/facebook/select-page", requireRole("owner"), (req, res) => {
           : { enabled: false, igId: "", igUsername: "", pageAccessToken: "" },
       },
     });
-    res.json(updated.metaChannels);
+
+    // خطوة ضرورية بس مش شرط تفشل الطلب لو ما نجحت — بدون هاي الخطوة الصفحة ما بترجع تستقبل رسائل عالويب هوك
+    let webhookSubscribeWarning = null;
+    try {
+      await metaAuth.subscribePageToWebhook(page.id, page.access_token);
+      console.log(`[meta-auth] تم اشتراك الصفحة ${page.name} (${page.id}) بويب هوك التطبيق بنجاح.`);
+    } catch (err) {
+      console.error(`[meta-auth] فشل اشتراك الصفحة ${page.name} بويب هوك التطبيق:`, err.message);
+      webhookSubscribeWarning = "الصفحة انربطت، بس صار خطأ أثناء تفعيل استقبال الرسائل تلقائياً — جرب زر (إعادة تفعيل استقبال الرسائل) بعدين.";
+    }
+
+    res.json({ ...updated.metaChannels, webhookSubscribeWarning });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// زر احتياطي: يعيد الاشتراك بويب هوك ماسنجر لصفحة مربوطة أصلاً (لو صار خطأ بالمرة الأولى، أو فيسبوك ألغى الاشتراك لأي سبب)
+router.post("/:id/facebook/resubscribe-webhook", requireRole("owner"), async (req, res) => {
+  try {
+    const bot = botStore.getBot(req.params.id);
+    if (!bot?.metaChannels?.messenger?.enabled || !bot.metaChannels.messenger.pageAccessToken) {
+      return res.status(400).json({ error: "ما في صفحة ماسنجر مربوطة بهاد البوت." });
+    }
+    await metaAuth.subscribePageToWebhook(bot.metaChannels.messenger.pageId, bot.metaChannels.messenger.pageAccessToken);
+    res.json({ message: "تم تفعيل استقبال الرسائل من جديد ✅" });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

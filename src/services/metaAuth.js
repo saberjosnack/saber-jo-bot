@@ -127,6 +127,24 @@ async function fetchAllPages(firstUrl) {
   return results;
 }
 
+// ---------- خطوة ضرورية وغير مرئية: الاشتراك الفعلي للصفحة بويب هوك التطبيق ----------
+// مجرد إنو عندنا Page Access Token مش كافي عشان نستقبل رسائل ماسنجر — لازم نطلب من فيسبوك
+// صراحة إنو يبدأ يبعت أحداث هاي الصفحة بالذات (messages/messaging_postbacks) لويب هوك تطبيقنا.
+// من غير هاد الطلب، الرسايل الواردة عالصفحة ما بتوصل ويب هوكنا أبداً (وهاد أشيع سبب "البوت ما بيرد عالماسنجر").
+async function subscribePageToWebhook(pageId, pageAccessToken) {
+  const res = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/subscribed_apps?` +
+      new URLSearchParams({
+        subscribed_fields: "messages,messaging_postbacks,message_deliveries,message_reads",
+        access_token: pageAccessToken,
+      }),
+    { method: "POST" }
+  );
+  const data = await res.json();
+  if (!data.success) throw new Error("فشل الاشتراك بويب هوك الصفحة: " + JSON.stringify(data));
+  return data;
+}
+
 function savePendingPages(botId, pages) {
   pendingPagesByBot.set(botId, { pages, savedAt: Date.now() });
 }
@@ -158,4 +176,5 @@ module.exports = {
   savePendingPages,
   getPendingPages,
   consumeSelectedPage,
+  subscribePageToWebhook,
 };
