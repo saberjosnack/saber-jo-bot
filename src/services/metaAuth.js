@@ -73,17 +73,27 @@ async function exchangeCodeForPages(code) {
   const userToken = longData.access_token || tokenData.access_token;
 
   // 3) قائمة الصفحات يلي المستخدم أدمن فيها (مع توكن كل صفحة، وحساب انستجرام بزنس المرتبط فيها لو موجود)
-  const pagesRes = await fetch(
+  // ملاحظة: /me/accounts بترجع النتايج بصفحات (pagination) — لو الحساب عم يدير صفحات كتيرة
+  // (متل هاد الحساب يلي عنده عشرات الصفحات لأعمال مختلفة)، الصفحة يلي بدنا ياها ممكن تكون
+  // مش بأول دفعة نتايج. لازم نلف على كل صفحات النتايج (paging.next) لحتى نجمعهم كلهم.
+  let pages = [];
+  let nextUrl =
     `https://graph.facebook.com/${GRAPH_VERSION}/me/accounts?` +
-      new URLSearchParams({
-        fields: "id,name,access_token,instagram_business_account{id,username}",
-        access_token: userToken,
-      })
-  );
-  const pagesData = await pagesRes.json();
-  if (!Array.isArray(pagesData.data)) throw new Error("فشل جلب الصفحات: " + JSON.stringify(pagesData));
+    new URLSearchParams({
+      fields: "id,name,access_token,instagram_business_account{id,username}",
+      limit: "100",
+      access_token: userToken,
+    });
 
-  return pagesData.data;
+  while (nextUrl) {
+    const pagesRes = await fetch(nextUrl);
+    const pagesData = await pagesRes.json();
+    if (!Array.isArray(pagesData.data)) throw new Error("فشل جلب الصفحات: " + JSON.stringify(pagesData));
+    pages = pages.concat(pagesData.data);
+    nextUrl = pagesData.paging?.next || null;
+  }
+
+  return pages;
 }
 
 function savePendingPages(botId, pages) {
