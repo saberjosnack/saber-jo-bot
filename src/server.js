@@ -32,10 +32,12 @@ app.use("/qr", qrPageRoutes);
 // الداشبورد الحقيقي — صفحة واحدة، متصلة بالـ API فوق مباشرة
 app.use("/dashboard", express.static(path.join(__dirname, "..", "public", "dashboard")));
 
-if (env.waProvider === "selfhosted") {
-  const wa = require("./services/selfHostedWhatsapp");
-  wa.startAllActiveBots().catch((err) => console.error("فشل بدء اتصالات البوتات:", err));
-}
+// بنشغل اتصالات الواتساب المباشرة (Baileys) دايماً بغض النظر عن WA_PROVIDER الافتراضي بالسيرفر،
+// لأنو هلأ صار كل بوت يقدر يفعّل "الربط المباشر (QR)" لحاله من الداشبورد بغض النظر عن الإعداد العام.
+// لو ما عملنا هيك، أي بوت مفعّل عليه الربط المباشر بيضل رمز QR تبعه "عم نجهز..." للأبد بعد أي
+// إعادة تشغيل للسيرفر (زي بعد كل نشر جديد)، لأنو الاتصال (بالذاكرة) ما بيرجع يبلش من نفسه.
+const wa = require("./services/selfHostedWhatsapp");
+wa.startAllActiveBots().catch((err) => console.error("فشل بدء اتصالات البوتات:", err));
 
 app.listen(env.port, () => {
   console.log(`Saber Jo Snack API شغال على المنفذ ${env.port}`);
