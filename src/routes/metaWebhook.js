@@ -4,7 +4,8 @@ const path = require("path");
 const env = require("../config/env");
 const botStore = require("../services/botStore");
 const meta = require("../services/metaMessaging");
-const { handleIncomingMessage } = require("../services/messageHandler");
+const { queueIncomingMessage } = require("../services/messageHandler");
+const { transcribeAudio } = require("../services/speechToText");
 
 const router = express.Router();
 
@@ -68,22 +69,65 @@ router.post("/", async (req, res) => {
 
       for (const event of entry.messaging || []) {
         try {
-          trace(`event: sender=${event.sender?.id} is_echo=${!!event.message?.is_echo} hasText=${!!event.message?.text}`);
+          const attachments = event.message?.attachments || [];
+          trace(
+            `event: sender=${event.sender?.id} is_echo=${!!event.message?.is_echo} hasText=${!!event.message
+              ?.text} attachments=${attachments.map((a) => a.type).join(",")}`
+          );
           if (event.message?.is_echo) continue; // رسائلنا احنا يلي بعتناها، مش رسالة زبون
           const from = event.sender?.id;
-          const text = event.message?.text;
-          if (!from || !text) {
-            trace("تجاهلت الحدث: ما في sender أو نص رسالة.");
+          if (!from) {
+            trace("تجاهلت الحدث: ما في sender.");
             continue;
           }
 
           const sendFn = (to, replyText) =>
             channel === "messenger" ? meta.sendMessengerText(bot, to, replyText) : meta.sendInstagramText(bot, to, replyText);
 
-          trace(`بلشت handleIncomingMessage لبوت=${bot.id} from=${from}`);
-          await handleIncomingMessage(bot.id, from, text, null, sendFn);
-          trace(`خلصت handleIncomingMessage بنجاح لبوت=${bot.id} from=${from}`);
-          console.log(`[meta-webhook] تمت معالجة رسالة ${channel} للبوت "${bot.name}" بنجاح.`);
+          let text = event.message?.text || "";
+          let image = null;
+
+          const imageAttachment = attachments.find((a) => a.type === "image");
+          const audioAttachment = attachments.find((a) => a.type === "audio");
+
+          if (imageAttachment?.payload?.url) {
+            try {
+              const { buffer, contentType } = await meta.downloadMetaAttachment(imageAttachment.payload.url);
+              image = { base64: buffer.toString("base64"), mediaType: contentType };
+              trace(`حمّلت صورة من ${channel} (${contentType}, ${buffer.length} bytes).`);
+            } catch (err) {
+              trace(`فشل تحميل الصورة: ${err.message}`);
+            }
+          }
+
+          if (audioAttachment?.payload?.url) {
+            try {
+              const { buffer } = await meta.downloadMetaAttachment(audioAttachment.payload.url);
+              const transcribed = await transcribeAudio(buffer, "voice.mp4");
+              if (transcribed) {
+                text = text ? `${text}\n${transcribed}` : transcribed;
+                trace(`حولت رسالة صوتية لنص: "${transcribed.slice(0, 80)}"`);
+              } else {
+                trace("ما قدرت أحوّل الرسالة الصوتية لنص (بدون مفتاح OpenAI أو فشل التحويل).");
+                await sendFn(from, "سمعت إنك بعتلي رسالة صوتية، بس ما قدرت أسمعها منيح 🙏 ممكن تكتبلي طلبك؟");
+                continue;
+              }
+            } catch (err) {
+              trace(`فشل تحميل/تحويل الرسالة الصوتية: ${err.message}`);
+              continue;
+            }
+          }
+
+          if (!text && !image) {
+            trace("تجاهلت الحدث: ما في نص ولا صورة ولا صوت مدعوم.");
+            continue;
+          }
+
+          // مؤشر "يكتب الآن..." مدعوم بماسنجر بس حالياً
+          const onTypingStart = channel === "messenger" ? () => meta.sendMessengerTypingOn(bot, from) : undefined;
+
+          trace(`أضفت الرسالة لطابور التجميع لبوت=${bot.id} from=${from}`);
+          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart);
         } catch (err) {
           trace(`خطأ بمعالجة الحدث: ${err.message}\n${err.stack}`);
           console.error(`خطأ بمعالجة رسالة ${channel} واردة:`, err);

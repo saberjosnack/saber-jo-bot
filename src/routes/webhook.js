@@ -1,8 +1,9 @@
 const express = require("express");
 const env = require("../config/env");
 const botStore = require("../services/botStore");
-const { handleIncomingMessage } = require("../services/messageHandler");
+const { queueIncomingMessage } = require("../services/messageHandler");
 const whatsapp = require("../services/whatsapp");
+const { transcribeAudio } = require("../services/speechToText");
 
 const router = express.Router();
 
@@ -36,12 +37,45 @@ router.post(["/", "/:botId"], async (req, res) => {
   console.log(`[webhook] رسالة وصلت للبوت "${bot.name}"، المزود:`, provider);
 
   try {
-    const { from, text } = extractIncomingMessage(req.body, provider);
+    const parsed = extractIncomingMessage(req.body, provider);
+    if (!parsed.from) return;
 
-    if (!from || !text) return;
+    let text = parsed.text || "";
+    let image = null;
 
-    await handleIncomingMessage(bot.id, from, text, null, (to, t) => whatsapp.sendText(bot, to, t));
-    console.log(`[webhook] تمت معالجة رسالة البوت "${bot.name}" بنجاح.`);
+    // تحميل الوسائط (صورة/صوت) مدعوم حالياً بس عن طريق Cloud API الرسمي — باقي المزودين نص بس.
+    if (provider === "cloud" && parsed.mediaId) {
+      if (parsed.mediaKind === "image") {
+        try {
+          image = await whatsapp.downloadIncomingImage(bot, parsed.mediaId);
+        } catch (err) {
+          console.error("[webhook] فشل تحميل الصورة:", err.message);
+        }
+      } else if (parsed.mediaKind === "audio") {
+        try {
+          const { buffer } = await whatsapp.downloadIncomingMedia(bot, parsed.mediaId);
+          const transcribed = await transcribeAudio(buffer, "voice.ogg");
+          if (transcribed) {
+            text = text ? `${text}\n${transcribed}` : transcribed;
+          } else {
+            await whatsapp.sendText(bot, parsed.from, "سمعت إنك بعتلي رسالة صوتية، بس ما قدرت أسمعها منيح 🙏 ممكن تكتبلي طلبك؟");
+            return;
+          }
+        } catch (err) {
+          console.error("[webhook] فشل تحميل/تحويل الرسالة الصوتية:", err.message);
+          return;
+        }
+      }
+    }
+
+    if (!text && !image) return;
+
+    // مؤشر "يكتب الآن..." مدعوم بس عن طريق Cloud API الرسمي (لازم معرف الرسالة الواردة)
+    const onTypingStart =
+      provider === "cloud" && parsed.messageId ? () => whatsapp.markReadWithTyping(bot, parsed.messageId) : undefined;
+
+    queueIncomingMessage(bot.id, parsed.from, text, image, (to, t) => whatsapp.sendText(bot, to, t), onTypingStart);
+    console.log(`[webhook] أضفت رسالة البوت "${bot.name}" لطابور التجميع.`);
   } catch (err) {
     console.error("خطأ بمعالجة رسالة واردة:", err);
   }
@@ -51,7 +85,15 @@ router.post(["/", "/:botId"], async (req, res) => {
 function extractIncomingMessage(body, provider) {
   if (provider === "cloud") {
     const entry = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    return { from: entry?.from, text: entry?.text?.body };
+    if (!entry) return { from: null, text: null };
+
+    if (entry.type === "image" && entry.image?.id) {
+      return { from: entry.from, text: entry.image.caption || "", mediaId: entry.image.id, mediaKind: "image", messageId: entry.id };
+    }
+    if (entry.type === "audio" && entry.audio?.id) {
+      return { from: entry.from, text: "", mediaId: entry.audio.id, mediaKind: "audio", messageId: entry.id };
+    }
+    return { from: entry.from, text: entry.text?.body, messageId: entry.id };
   }
 
   if (provider === "ultramsg") {

@@ -1,6 +1,7 @@
 const path = require("path");
 const botStore = require("./botStore");
-const { handleIncomingMessage } = require("./messageHandler");
+const { queueIncomingMessage } = require("./messageHandler");
+const { transcribeAudio } = require("./speechToText");
 
 const silentLogger = {
   level: "warn",
@@ -26,6 +27,7 @@ async function startBotConnection(botId) {
     useMultiFileAuthState,
     DisconnectReason,
     fetchLatestBaileysVersion,
+    downloadMediaMessage,
   } = require("@whiskeysockets/baileys");
 
   const { state, saveCreds } = await useMultiFileAuthState(authFolder(botId));
@@ -88,14 +90,31 @@ async function startBotConnection(botId) {
       if (msg.key.fromMe || !msg.message) continue;
 
       const from = msg.key.remoteJid?.replace("@s.whatsapp.net", "");
-      const text =
+      let text =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         msg.message.imageMessage?.caption ||
         "";
+      let image = null;
 
       try {
-        await handleIncomingMessage(botId, from, text, null, (to, t) => sendText(botId, to, t));
+        if (msg.message.imageMessage) {
+          const buffer = await downloadMediaMessage(msg, "buffer", {});
+          image = { base64: buffer.toString("base64"), mediaType: msg.message.imageMessage.mimetype || "image/jpeg" };
+        } else if (msg.message.audioMessage) {
+          const buffer = await downloadMediaMessage(msg, "buffer", {});
+          const transcribed = await transcribeAudio(buffer, "voice.ogg");
+          if (transcribed) {
+            text = text ? `${text}\n${transcribed}` : transcribed;
+          } else {
+            await sendText(botId, from, "سمعت إنك بعتلي رسالة صوتية، بس ما قدرت أسمعها منيح 🙏 ممكن تكتبلي طلبك؟");
+            continue;
+          }
+        }
+
+        if (!text && !image) continue;
+
+        queueIncomingMessage(botId, from, text, image, (to, t) => sendText(botId, to, t));
       } catch (err) {
         console.error(`خطأ بمعالجة رسالة للبوت ${botId}:`, err);
       }

@@ -7,6 +7,10 @@ module.exports = {
   aiApiKey: process.env.ANTHROPIC_API_KEY,
   aiModel: process.env.AI_MODEL || "claude-haiku-4-5-20251001",
 
+  // مفتاح OpenAI — يستخدم بس لتحويل الرسائل الصوتية لنص (Whisper). اختياري:
+  // لو مش موجود، البوت بيرد على الرسائل الصوتية برسالة توضح إنه ما قدر يسمعها بدل ما يتجاهلها بصمت.
+  openaiApiKey: process.env.OPENAI_API_KEY || null,
+
   waProvider: process.env.WA_PROVIDER || "green",
   greenApiInstanceId: process.env.GREEN_API_INSTANCE_ID,
   greenApiToken: process.env.GREEN_API_TOKEN,

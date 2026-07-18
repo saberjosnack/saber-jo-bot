@@ -116,8 +116,8 @@ async function markReadWithTyping(bot, messageId) {
   });
 }
 
-// تحميل صورة أرسلها الزبون (Cloud API) — يرجع base64 + نوعها لتمريرها لموديل الرؤية
-async function downloadIncomingImage(bot, mediaId) {
+// تحميل أي وسائط أرسلها الزبون (صورة أو صوت) عن طريق Cloud API — يرجع buffer خام + نوعها
+async function downloadIncomingMedia(bot, mediaId) {
   const cfg = resolveConfig(bot);
   const metaRes = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
     headers: { Authorization: `Bearer ${cfg.whatsappToken}` },
@@ -125,9 +125,15 @@ async function downloadIncomingImage(bot, mediaId) {
   const meta = await metaRes.json();
 
   const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${cfg.whatsappToken}` } });
-  const buffer = await fileRes.arrayBuffer();
+  const buffer = Buffer.from(await fileRes.arrayBuffer());
 
-  return { base64: Buffer.from(buffer).toString("base64"), mediaType: meta.mime_type || "image/jpeg" };
+  return { buffer, mimeType: meta.mime_type || "application/octet-stream" };
+}
+
+// تحميل صورة أرسلها الزبون (Cloud API) — يرجع base64 + نوعها لتمريرها لموديل الرؤية
+async function downloadIncomingImage(bot, mediaId) {
+  const { buffer, mimeType } = await downloadIncomingMedia(bot, mediaId);
+  return { base64: buffer.toString("base64"), mediaType: mimeType || "image/jpeg" };
 }
 
 /**
@@ -149,4 +155,4 @@ async function sendImage(bot, to, imageUrl, caption = "") {
   return sendImageViaGreenApi(cfg, to, imageUrl, caption);
 }
 
-module.exports = { sendText, sendImage, markReadWithTyping, downloadIncomingImage };
+module.exports = { sendText, sendImage, markReadWithTyping, downloadIncomingImage, downloadIncomingMedia };
