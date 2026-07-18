@@ -56,6 +56,38 @@ function findMentionedItemsWithImages(menu, userText, replyText) {
   return menu.filter((item) => item.available && item.imageUrl && item.name && haystack.includes(item.name));
 }
 
+// بيرجع بيانات الزبون المحفوظة من طلب سابق (لو موجودة) — عشان البوت يتعرف على الزبون الراجع
+// بدل ما يسأله من الصفر عن اسمه ورقمه وعنوانه كل مرة.
+function getCustomerProfile(botId, from) {
+  try {
+    const raw = store.read(`bots/${botId}/customers.json`);
+    const customers = Array.isArray(raw) ? {} : raw;
+    return customers[from] || null;
+  } catch (err) {
+    console.error("[messageHandler] فشل قراءة بيانات الزبون:", err.message);
+    return null;
+  }
+}
+
+// بيحفظ/يحدّث بيانات الزبون بعد كل طلب مؤكد (الاسم، رقم التواصل، آخر عنوان) — مخزنة لكل بوت لحاله.
+function upsertCustomerProfile(botId, from, order, items) {
+  try {
+    const raw = store.read(`bots/${botId}/customers.json`);
+    const customers = Array.isArray(raw) ? {} : raw;
+    const existing = customers[from] || {};
+    customers[from] = {
+      name: order.customerName || existing.name || "",
+      phone: order.contactPhone || existing.phone || from,
+      area: order.area || existing.area || "",
+      lastItems: items.length ? items : existing.lastItems || [],
+      lastOrderAt: new Date().toISOString(),
+    };
+    store.write(`bots/${botId}/customers.json`, customers);
+  } catch (err) {
+    console.error("[messageHandler] فشل حفظ بيانات الزبون:", err.message);
+  }
+}
+
 // بيسجل الطلب بلوحة التحكم، وإذا كان مفعّل بإعدادات "وجهة الطلبات"، بيبعت ملخصه لجروب واتساب مخصص للموظفين.
 // هاد الجروب (رقمه/معرّفه) مش موجود إطلاقاً بأي مكان يشوفه الموديل أو الزبون — هون بس بالكود، منفصل تماماً عن المحادثة.
 async function recordOrder(bot, from, channel, order) {
@@ -84,6 +116,9 @@ async function recordOrder(bot, from, channel, order) {
     orders.push(record);
     store.write(`bots/${bot.id}/orders.json`, orders);
     trace(`recordOrder: سجّلت طلب جديد ${record.id} لبوت=${bot.id} from=${from} channel=${channel}`);
+
+    upsertCustomerProfile(bot.id, from, order, items);
+    trace(`recordOrder: حدّثت بيانات الزبون ${from} (اسم/رقم/عنوان) لبوت=${bot.id}`);
 
     const settings = store.read(`configs/${bot.configId}/settings.json`);
     const dest = settings.orderDestination || {};
@@ -177,10 +212,15 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   const conversations = Array.isArray(conversationsRaw) ? {} : conversationsRaw;
   const history = conversations[from] || [];
 
-  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length})...`);
+  const customerProfile = getCustomerProfile(botId, from);
+  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length}, زبون سابق=${customerProfile ? "نعم" : "لا"})...`);
   let reply, order;
   try {
-    const result = await withTimeout(generateReply(history, text, image, bot.configId), AI_TIMEOUT_MS, "generateReply");
+    const result = await withTimeout(
+      generateReply(history, text, image, bot.configId, customerProfile),
+      AI_TIMEOUT_MS,
+      "generateReply"
+    );
     reply = result.reply;
     order = result.order;
     trace(`handleIncomingMessage: رجع رد من generateReply لـ ${from} (replyLen=${reply?.length || 0}، order=${order ? "نعم" : "لا"}).`);

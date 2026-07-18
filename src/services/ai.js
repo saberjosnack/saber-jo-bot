@@ -1,5 +1,5 @@
 const env = require("../config/env");
-const { buildSystemPrompt } = require("./promptBuilder");
+const { buildSystemPrompt, buildCustomerProfileSection } = require("./promptBuilder");
 
 // أداة تسجيل الطلب — الموديل يستدعيها لما الزبون يأكد كل تفاصيل طلبه صراحة (اسمها بالبرومبت أيضاً، شوف promptBuilder.js).
 // لما تنستدعى، منسجل الطلب بلوحة التحكم ومنبعته لجروب الواتساب (لو مفعّل) بشكل منفصل تماماً عن أي شي الموديل شافه أو قاله للزبون.
@@ -35,10 +35,14 @@ const ORDER_TOOL = {
  * @param {string} userMessage
  * @param {{base64: string, mediaType: string} | null} image - صورة أرسلها الزبون (اختياري)
  * @param {string} configId - أي بوت/قالب إعدادات نستخدم
+ * @param {{name?:string, phone?:string, area?:string, lastItems?:string[], lastOrderAt?:string} | null} customerProfile - بيانات الزبون من طلب سابق (لو موجودة)
  * @returns {Promise<{reply: string, order: object|null}>} رد البوت النصي + تفاصيل الطلب لو تأكد هالرسالة
  */
-async function generateReply(history, userMessage, image = null, configId = "default") {
+async function generateReply(history, userMessage, image = null, configId = "default", customerProfile = null) {
   const systemPrompt = buildSystemPrompt(configId);
+  // بيانات الزبون منفصلة عن البرومبت الثابت أعلاه — عمداً بدون cache_control، عشان ما نكسر كاش
+  // البرومبت الكبير (منيو/إعدادات) يلي مشترك بين كل الزبائن. هاي بلوك صغير خاص بهاد الزبون بس.
+  const customerSection = buildCustomerProfileSection(customerProfile);
 
   const userContent = image
     ? [
@@ -62,8 +66,12 @@ async function generateReply(history, userMessage, image = null, configId = "def
       // درجة حرارة متوسطة: كفاية عشان الصياغة تختلف من رد لرد (ما يبين البوت مكرر/آلي قدام ميتا)،
       // بس القواعد الصارمة بالبرومبت (منع اختلاق أسعار/أصناف) بتضل مطبقة بغض النظر عن الحرارة.
       temperature: 0.45,
-      // الجزء الثابت (منيو، توصيل، حواجز) بيتخزن مؤقتاً — كل رسالة بعدها بتدفع 10% بس من سعره
-      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      // الجزء الثابت (منيو، توصيل، حواجز) بيتخزن مؤقتاً — كل رسالة بعدها بتدفع 10% بس من سعره.
+      // بلوك بيانات الزبون (لو موجود) منفصل وبدون تخزين مؤقت، عشان ما يكسر الكاش المشترك بين كل الزبائن.
+      system: [
+        { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+        ...(customerSection ? [{ type: "text", text: customerSection }] : []),
+      ],
       messages,
       tools: [ORDER_TOOL],
     }),

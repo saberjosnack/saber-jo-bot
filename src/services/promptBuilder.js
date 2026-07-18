@@ -42,6 +42,20 @@ function isOpenNow(openTime, closeTime, nowJordan = new Date()) {
   return minutesNow >= openMinutes && minutesNow < closeMinutes;
 }
 
+// نص صغير منفصل عن البرومبت الثابت (Mشان ما نكسر الـ prompt caching — لو حطينا بيانات الزبون جوا البرومبت
+// الكبير المخزّن مؤقتاً، رح يصير كل زبون جديد يدفع سعر كامل بدل الخصم، لأن أي تغيير بالنص بيلغي الكاش).
+// هاد النص منفصل، بينضاف كبلوك تاني بالـ system array بدون cache_control (شوف ai.js).
+function buildCustomerProfileSection(customerProfile) {
+  if (!customerProfile) return "";
+  return `
+معلومات زبون سابق (عندنا سجل له من طلب قبل هيك، نفس رقم التواصل):
+- الاسم: ${customerProfile.name || "غير مسجل"}
+- رقم التواصل: ${customerProfile.phone || "غير مسجل"}
+- آخر عنوان توصيل: ${customerProfile.area || "غير مسجل"}
+- آخر أصناف طلبها: ${(customerProfile.lastItems || []).join("، ") || "غير مسجلة"}
+استخدم هاي المعلومات: رحّب فيه بشكل طبيعي كزبون سابق، واسأله بلطف إذا بده يوصل لنفس العنوان يلي فوق قبل ما تطلب منه يعيد يعطيك عنوانه من الصفر. لو قالك تغيّر شي (عنوان، رقم)، اعتمد الجديد. لو في "معلومات زبون سابق" هون، اعتمدها بدل ما تسأل الزبون من الصفر عن اسمه/رقمه/عنوانه — بس تأكد منه إذا لسا نفس التفاصيل قبل ما تأكد الطلب النهائي.`.trim();
+}
+
 function buildSystemPrompt(configId = "default") {
   const settings = store.read(`configs/${configId}/settings.json`);
   const menu = store.read(`configs/${configId}/menu.json`);
@@ -70,7 +84,7 @@ function buildSystemPrompt(configId = "default") {
   const dialect = identity.dialect || "الأردن";
 
   return `
-قواعد صارمة قبل أي شي (لو تعارضت مع أي تعليمة تانية بالبرومبت، هاي القواعد الخمسة تفوز دايماً):
+قواعد صارمة قبل أي شي (لو تعارضت مع أي تعليمة تانية بالبرومبت، هاي القواعد تفوز دايماً):
 1. ما تجاوب ولا معلومة (صنف، سعر، توفر، عرض، منطقة توصيل) إلا إذا كانت موجودة حرفياً بقائمة المنيو أو رسوم التوصيل تحت. لو الزبون سأل عن شي مش موجود، قوله بصراحة إنه مش موجود بدل ما تختلق جواب.
 2. لو السعر مسجل "غير مسجل بعد بالنظام"، قول للزبون إنك بتتأكد من السعر وترجعله، ولا تقدّر أو تخمّن أي رقم.
 3. ما تأكد أي طلب أو تعتبره مُرسل قبل ما الزبون يأكد صراحة كل التفاصيل (الصنف، الكمية، المنطقة، رقم التواصل).
@@ -104,4 +118,4 @@ ${prompt}
 `.trim();
 }
 
-module.exports = { buildSystemPrompt, isOpenNow };
+module.exports = { buildSystemPrompt, buildCustomerProfileSection, isOpenNow };

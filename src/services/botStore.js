@@ -51,6 +51,7 @@ function createBot(name, shareConfigFromBotId = null) {
   store.write(`bots/${id}/conversations.json`, {});
   store.write(`bots/${id}/pausedConversations.json`, {});
   store.write(`bots/${id}/orders.json`, []);
+  store.write(`bots/${id}/customers.json`, {});
 
   const newBot = {
     id,
