@@ -117,7 +117,7 @@ router.post("/", async (req, res) => {
             channel === "messenger" ? meta.sendMessengerImage(bot, to, imageUrl) : meta.sendInstagramImage(bot, to, imageUrl);
 
           trace(`أضفت الرسالة لطابور التجميع لبوت=${bot.id} from=${from}`);
-          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart, sendImageFn);
+          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart, sendImageFn, channel);
         } catch (err) {
           trace(`خطأ بمعالجة الحدث: ${err.message}\n${err.stack}`);
           console.error(`خطأ بمعالجة رسالة ${channel} واردة:`, err);

@@ -81,7 +81,8 @@ router.post(["/", "/:botId"], async (req, res) => {
       image,
       (to, t) => whatsapp.sendText(bot, to, t),
       onTypingStart,
-      (to, imageUrl) => whatsapp.sendImage(bot, to, imageUrl)
+      (to, imageUrl) => whatsapp.sendImage(bot, to, imageUrl),
+      "whatsapp"
     );
     console.log(`[webhook] أضفت رسالة البوت "${bot.name}" لطابور التجميع.`);
   } catch (err) {

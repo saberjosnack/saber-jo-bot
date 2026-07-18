@@ -9,6 +9,7 @@ const metaAuth = require("../services/metaAuth");
 const env = require("../config/env");
 const { requireAuth, requireRole, requireBotAccess } = require("../middleware/auth");
 const wa = require("../services/selfHostedWhatsapp");
+const whatsapp = require("../services/whatsapp");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -320,6 +321,18 @@ router.put("/:id/delivery-fees", requireRole("owner"), (req, res) => {
 // ---------- طلبات البوت ----------
 router.get("/:id/orders", requireRole("owner", "orders", "viewer"), (req, res) => {
   res.json(store.read(`bots/${req.params.id}/orders.json`));
+});
+
+// ---------- قائمة جروبات الواتساب — عشان المالك يختار جروب "وجهة الطلبات" من الداشبورد مباشرة ----------
+router.get("/:id/whatsapp-groups", requireRole("owner"), async (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+  try {
+    const groups = await whatsapp.getGroups(bot);
+    res.json(groups);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 module.exports = router;

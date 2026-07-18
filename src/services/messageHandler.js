@@ -1,6 +1,7 @@
 const store = require("./store");
 const botStore = require("./botStore");
 const { generateReply } = require("./ai");
+const whatsapp = require("./whatsapp");
 const { trace } = require("./trace");
 
 // قيم افتراضية لو ما في إعدادات "سرعة الرد" محفوظة أصلاً (بوتات قديمة قبل ما ضفنا هاي الميزة)
@@ -55,6 +56,62 @@ function findMentionedItemsWithImages(menu, userText, replyText) {
   return menu.filter((item) => item.available && item.imageUrl && item.name && haystack.includes(item.name));
 }
 
+// بيسجل الطلب بلوحة التحكم، وإذا كان مفعّل بإعدادات "وجهة الطلبات"، بيبعت ملخصه لجروب واتساب مخصص للموظفين.
+// هاد الجروب (رقمه/معرّفه) مش موجود إطلاقاً بأي مكان يشوفه الموديل أو الزبون — هون بس بالكود، منفصل تماماً عن المحادثة.
+async function recordOrder(bot, from, channel, order) {
+  try {
+    const ordersRaw = store.read(`bots/${bot.id}/orders.json`);
+    const orders = Array.isArray(ordersRaw) ? ordersRaw : [];
+
+    const items = (order.itemsSummary || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const record = {
+      id: `ORD-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      name: order.customerName || "زبون",
+      phone: order.contactPhone || from,
+      items,
+      total: typeof order.totalPrice === "number" ? order.totalPrice : null,
+      area: order.area || "",
+      notes: order.notes || "",
+      status: "new",
+      channel,
+    };
+
+    orders.push(record);
+    store.write(`bots/${bot.id}/orders.json`, orders);
+    trace(`recordOrder: سجّلت طلب جديد ${record.id} لبوت=${bot.id} from=${from} channel=${channel}`);
+
+    const settings = store.read(`configs/${bot.configId}/settings.json`);
+    const dest = settings.orderDestination || {};
+    if (dest.mode === "whatsapp_group" && dest.target) {
+      const summaryLines = [
+        "🧾 طلب جديد",
+        `الأصناف: ${items.length ? items.join("، ") : order.itemsSummary || "-"}`,
+        `المنطقة: ${record.area || "-"}`,
+        record.total !== null ? `المجموع: ${record.total} د.أ` : null,
+        record.name !== "زبون" ? `الاسم: ${record.name}` : null,
+        `رقم التواصل: ${record.phone}`,
+        record.notes ? `ملاحظات: ${record.notes}` : null,
+      ].filter(Boolean);
+
+      try {
+        await whatsapp.sendText(bot, dest.target, summaryLines.join("\n"));
+        trace(`recordOrder: بعت الطلب ${record.id} لجروب الواتساب (${dest.targetName || dest.target}).`);
+      } catch (err) {
+        trace(`recordOrder: فشل إرسال الطلب ${record.id} لجروب الواتساب: ${err.message}`);
+        console.error("[messageHandler] فشل إرسال الطلب لجروب الواتساب:", err.message);
+      }
+    }
+  } catch (err) {
+    trace(`recordOrder: خطأ عام بتسجيل الطلب: ${err.message}`);
+    console.error("[messageHandler] فشل تسجيل الطلب:", err.message);
+  }
+}
+
 /**
  * منطق معالجة أي رسالة واردة لأي بوت، بغض النظر عن مصدرها
  * (Green API, UltraMsg, Meta Cloud API, أو الاتصال المباشر self-hosted).
@@ -65,8 +122,9 @@ function findMentionedItemsWithImages(menu, userText, replyText) {
  * @param {{base64:string, mediaType:string}|null} image - صورة أرسلها الزبون (اختياري)
  * @param {(to:string, text:string) => Promise<void>} sendText - دالة الإرسال الخاصة بهاد البوت
  * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لإرسال صور الأصناف تلقائياً)
+ * @param {string} [channel] - "whatsapp" | "messenger" | "instagram" — لتسجيله مع الطلب بس
  */
-async function handleIncomingMessage(botId, from, text, image, sendText, sendImage) {
+async function handleIncomingMessage(botId, from, text, image, sendText, sendImage, channel = "whatsapp") {
   trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} hasImage=${!!image}`);
   if (!from) return;
 
@@ -120,10 +178,12 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   const history = conversations[from] || [];
 
   trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length})...`);
-  let reply;
+  let reply, order;
   try {
-    reply = await withTimeout(generateReply(history, text, image, bot.configId), AI_TIMEOUT_MS, "generateReply");
-    trace(`handleIncomingMessage: رجع رد من generateReply لـ ${from} (replyLen=${reply?.length || 0}).`);
+    const result = await withTimeout(generateReply(history, text, image, bot.configId), AI_TIMEOUT_MS, "generateReply");
+    reply = result.reply;
+    order = result.order;
+    trace(`handleIncomingMessage: رجع رد من generateReply لـ ${from} (replyLen=${reply?.length || 0}، order=${order ? "نعم" : "لا"}).`);
   } catch (err) {
     trace(`handleIncomingMessage: فشل generateReply لـ ${from}: ${err.message}\n${err.stack}`);
     reply = "معليش، صار عندي خلل بسيط 🙏 جرب ابعت رسالتك كمان مرة بعد شوي.";
@@ -153,6 +213,11 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
       trace(`handleIncomingMessage: فشل إرسال صورة صنف لـ ${from}: ${err.message}`);
       console.error("[messageHandler] فشل إرسال صورة صنف تلقائياً:", err.message);
     }
+  }
+
+  if (order) {
+    trace(`handleIncomingMessage: طلب مؤكد من ${from} — بلشت recordOrder...`);
+    await recordOrder(bot, from, channel, order);
   }
 
   history.push({ role: "user", content: text || "[صورة]" });
@@ -197,7 +262,7 @@ async function flushBuffer(key) {
 
   try {
     trace(`flushBuffer: بلشت handleIncomingMessage لـ ${key}`);
-    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText, buffer.sendImage);
+    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText, buffer.sendImage, buffer.channel);
     trace(`flushBuffer: خلص handleIncomingMessage لـ ${key} بنجاح.`);
   } catch (err) {
     trace(`flushBuffer: خطأ بمعالجة الرسائل المجمّعة لـ ${key}: ${err.message}\n${err.stack}`);
@@ -213,8 +278,9 @@ async function flushBuffer(key) {
  * @param {() => Promise<void>} [onTypingStart] - اختياري: بينفّذ لما نبلش نعالج (قبل توليد الرد) —
  *   يستخدم لإظهار مؤشر "يكتب الآن..." (مدعوم حالياً بماسنجر/انستجرام).
  * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لصور الأصناف التلقائية)
+ * @param {string} [channel] - "whatsapp" | "messenger" | "instagram" — لتسجيله مع أي طلب ينسجل بهاي المحادثة
  */
-function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart, sendImage) {
+function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart, sendImage, channel = "whatsapp") {
   if (!from) {
     trace(`queueIncomingMessage: تجاهلت — ما في from (botId=${botId}).`);
     return;
@@ -234,6 +300,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
     existing.sendText = sendText;
     if (onTypingStart) existing.onTypingStart = onTypingStart;
     if (sendImage) existing.sendImage = sendImage;
+    if (channel) existing.channel = channel;
     clearTimeout(existing.timer);
     existing.timer = setTimeout(() => flushBuffer(key), debounceMs);
     trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، أعدت ضبط التايمر (${debounceMs}ms).`);
@@ -246,6 +313,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
     sendText,
     onTypingStart,
     sendImage,
+    channel,
     timer: null,
   };
   buffer.timer = setTimeout(() => flushBuffer(key), debounceMs);

@@ -54,7 +54,8 @@ async function sendImageViaUltraMsg(cfg, to, imageUrl, caption = "") {
 }
 
 async function sendViaWasender(cfg, to, text) {
-  const formattedTo = to.startsWith("+") ? to : `+${to}`;
+  // معرّفات الجروبات بتنتهي بـ "@g.us" — هاي مو رقم هاتف، فما بنحطلها "+" (لازم ترسل زي ما هي بالضبط)
+  const formattedTo = to.includes("@g.us") ? to : to.startsWith("+") ? to : `+${to}`;
   const res = await fetch("https://www.wasenderapi.com/api/send-message", {
     method: "POST",
     headers: {
@@ -155,4 +156,22 @@ async function sendImage(bot, to, imageUrl, caption = "") {
   return sendImageViaGreenApi(cfg, to, imageUrl, caption);
 }
 
-module.exports = { sendText, sendImage, markReadWithTyping, downloadIncomingImage, downloadIncomingMedia };
+// بيرجع قائمة جروبات الواتساب المتصلة بحساب البوت — مستخدم بالداشبورد عشان المالك يختار جروب "وجهة الطلبات"
+// بدون ما يحتاج يعرف رقم/معرّف الجروب التقني يدوياً. مدعوم حالياً لمزود Wasender بس.
+async function getGroups(bot) {
+  const cfg = resolveConfig(bot);
+  if (cfg.provider !== "wasender") {
+    throw new Error("جلب قائمة الجروبات مدعوم حالياً بس لمزود Wasender.");
+  }
+  const res = await fetch("https://www.wasenderapi.com/api/groups", {
+    headers: { Authorization: `Bearer ${cfg.wasenderApiKey}` },
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`فشل جلب قائمة الجروبات (${res.status}): ${errBody}`);
+  }
+  const data = await res.json();
+  return (data.data || []).map((g) => ({ jid: g.jid, name: g.name }));
+}
+
+module.exports = { sendText, sendImage, getGroups, markReadWithTyping, downloadIncomingImage, downloadIncomingMedia };

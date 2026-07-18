@@ -121,7 +121,8 @@ async function startBotConnection(botId) {
           image,
           (to, t) => sendText(botId, to, t),
           undefined,
-          (to, imageUrl) => sendImage(botId, to, imageUrl)
+          (to, imageUrl) => sendImage(botId, to, imageUrl),
+          "whatsapp"
         );
       } catch (err) {
         console.error(`خطأ بمعالجة رسالة للبوت ${botId}:`, err);
