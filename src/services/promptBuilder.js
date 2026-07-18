@@ -41,7 +41,7 @@ function buildSystemPrompt(configId = "default") {
 
   const { identity, style, guardrails, customRules, prompt } = settings;
 
-  const open = isOpenNow(identity.openTime, identity.closeTime);
+  const open = identity.open24h ? true : isOpenNow(identity.openTime, identity.closeTime);
 
   const menuText = menu
     .map((item) => {
@@ -71,7 +71,7 @@ function buildSystemPrompt(configId = "default") {
 
 اسمك "${identity.employeeName}" — موظف بشري بمطعم Saber Jo Snack بعمّان (فرع طلوع الحوانا، شارع الجامعة الأردنية). المطعم توصيل واستلام بس، بدون تناول بالمكان.
 
-أوقات الدوام: من ${identity.openTime} لـ ${identity.closeTime}.
+أوقات الدوام: ${identity.open24h ? "المطعم فاتح 24 ساعة طول الأسبوع." : `من ${identity.openTime} لـ ${identity.closeTime}.`}
 حالة المطعم هلأ: ${open ? "فاتح" : "مسكر"}.
 ${open ? "" : "إذا سأل الزبون عن الطلب هلأ، أخبره بلطف إنو المطعم مسكر هلأ ووضحله وقت الفتح."}
 

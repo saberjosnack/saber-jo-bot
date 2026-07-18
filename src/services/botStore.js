@@ -90,10 +90,16 @@ function deleteBot(botId) {
 
 function defaultSettingsTemplate(employeeName) {
   return {
-    identity: { employeeName, openTime: "15:00", closeTime: "23:59", salesPower: "mid" },
+    identity: { employeeName, open24h: false, openTime: "15:00", closeTime: "23:59", salesPower: "mid" },
     style: { tones: ["ودود"], emojiLevel: "low", responseLength: 400 },
     voice: { enabled: false, dialect: "الأردن", gender: "أنثى", voiceName: "رنا" },
     sendImagesAutomatically: true,
+    // إعدادات سرعة الرد — قابلة للتحكم من الداشبورد (كل القيم بالثواني)
+    timing: {
+      debounceSec: 6, // كم ثانية ننتظر بعد آخر رسالة قبل ما نجمّع ونرد
+      minDelaySec: 1.2, // أقل مدة "تفكير/كتابة" قبل الإرسال
+      maxDelaySec: 6, // أقصى مدة قبل الإرسال (حتى لو الرد طويل)
+    },
     guardrails: {
       "no-prices": true,
       "no-competitors": true,

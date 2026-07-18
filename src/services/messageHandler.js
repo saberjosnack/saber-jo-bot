@@ -3,9 +3,26 @@ const botStore = require("./botStore");
 const { generateReply } = require("./ai");
 const { trace } = require("./trace");
 
-// كم ثانية ننتظر بعد آخر رسالة قبل ما نبلش نرد — عشان لو الزبون بعت كذا رسالة قصيرة ورا بعض
-// (مثلاً كل كلمة بسطر لحالها) نجمعهم ونرد عليهم مرة وحدة، بدل ما نرد على كل جزء لحاله.
-const DEBOUNCE_MS = 6000;
+// قيم افتراضية لو ما في إعدادات "سرعة الرد" محفوظة أصلاً (بوتات قديمة قبل ما ضفنا هاي الميزة)
+const DEFAULT_TIMING = { debounceMs: 6000, baseDelayMs: 1200, maxDelayMs: 6000 };
+const PER_CHAR_MS = 25; // مش قابل للتعديل من الداشبورد حالياً — تفصيل تقني بسيط
+
+// بيقرا إعدادات "سرعة الرد" (settings.timing) الخاصة بهاد البوت من الداشبورد — بالثواني بالداشبورد، وبنحولها ميلي ثانية هون.
+function getTimingSettings(botId) {
+  try {
+    const bot = botStore.getBot(botId);
+    if (!bot) return DEFAULT_TIMING;
+    const settings = store.read(`configs/${bot.configId}/settings.json`);
+    const t = settings?.timing || {};
+    return {
+      debounceMs: Math.round((Number(t.debounceSec) || 6) * 1000),
+      baseDelayMs: Math.round((Number(t.minDelaySec) || 1.2) * 1000),
+      maxDelayMs: Math.round((Number(t.maxDelaySec) || 6) * 1000),
+    };
+  } catch (err) {
+    return DEFAULT_TIMING;
+  }
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,12 +39,9 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-// تأخير "بشري" قبل إرسال الرد — يتناسب مع طول الرد (رد أطول = وقت "كتابة" أطول)، بحدود معقولة.
-function computeHumanDelay(replyText) {
-  const base = 1200;
-  const perChar = 25;
-  const max = 6000;
-  return Math.min(max, base + (replyText?.length || 0) * perChar);
+// تأخير "بشري" قبل إرسال الرد — يتناسب مع طول الرد (رد أطول = وقت "كتابة" أطول)، بحدود يتحكم فيها المالك من الداشبورد.
+function computeHumanDelay(replyText, timing = DEFAULT_TIMING) {
+  return Math.min(timing.maxDelayMs, timing.baseDelayMs + (replyText?.length || 0) * PER_CHAR_MS);
 }
 
 /**
@@ -57,6 +71,11 @@ async function handleIncomingMessage(botId, from, text, image, sendText) {
   }
 
   const settings = store.read(`configs/${bot.configId}/settings.json`);
+  const timing = {
+    debounceMs: Math.round((Number(settings.timing?.debounceSec) || 6) * 1000),
+    baseDelayMs: Math.round((Number(settings.timing?.minDelaySec) || 1.2) * 1000),
+    maxDelayMs: Math.round((Number(settings.timing?.maxDelaySec) || 6) * 1000),
+  };
   // ملاحظة: بعض البوتات القديمة (متل "default") انعمل إلها الملف تلقائياً كمصفوفة "[]" بدل كائن "{}"
   // (bug قديم بـ store.ensureFile). لو صار هيك، أي كتابة عليه بعدين بتضيع بصمت لأن
   // JSON.stringify على مصفوفة بيتجاهل أي property نصية زايدة عليها. نحمي نفسنا هون بتحويلها كائن.
@@ -99,7 +118,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText) {
   }
 
   trace(`handleIncomingMessage: بلشت التأخير البشري قبل الإرسال لـ ${from}...`);
-  await sleep(computeHumanDelay(reply));
+  await sleep(computeHumanDelay(reply, timing));
   trace(`handleIncomingMessage: بلشت sendText لـ ${from}...`);
   try {
     await sendText(from, reply);
@@ -161,7 +180,7 @@ async function flushBuffer(key) {
 
 /**
  * الطريقة المفضّلة لتمرير رسالة واردة — بديل عن استدعاء handleIncomingMessage مباشرة.
- * بتجمع كل الرسائل يلي توصل من نفس الزبون خلال فترة قصيرة (DEBOUNCE_MS) وترد عليهم دفعة وحدة،
+ * بتجمع كل الرسائل يلي توصل من نفس الزبون خلال فترة قصيرة (مدة التجميع من إعدادات "سرعة الرد" بالداشبورد) وترد عليهم دفعة وحدة،
  * بدل ما ترد على كل رسالة/سطر لحاله. كل الـ webhooks لازم تستخدم هاي الدالة.
  *
  * @param {() => Promise<void>} [onTypingStart] - اختياري: بينفّذ لما نبلش نعالج (قبل توليد الرد) —
@@ -179,6 +198,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
 
   const key = bufferKey(botId, from);
   const existing = pendingBuffers.get(key);
+  const { debounceMs } = getTimingSettings(botId);
 
   if (existing) {
     if (text) existing.parts.push(text);
@@ -186,8 +206,8 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
     existing.sendText = sendText;
     if (onTypingStart) existing.onTypingStart = onTypingStart;
     clearTimeout(existing.timer);
-    existing.timer = setTimeout(() => flushBuffer(key), DEBOUNCE_MS);
-    trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، أعدت ضبط التايمر (${DEBOUNCE_MS}ms).`);
+    existing.timer = setTimeout(() => flushBuffer(key), debounceMs);
+    trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، أعدت ضبط التايمر (${debounceMs}ms).`);
     return;
   }
 
@@ -198,9 +218,9 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
     onTypingStart,
     timer: null,
   };
-  buffer.timer = setTimeout(() => flushBuffer(key), DEBOUNCE_MS);
+  buffer.timer = setTimeout(() => flushBuffer(key), debounceMs);
   pendingBuffers.set(key, buffer);
-  trace(`queueIncomingMessage: أنشأت بفر جديد key=${key}، ضبطت تايمر (${DEBOUNCE_MS}ms).`);
+  trace(`queueIncomingMessage: أنشأت بفر جديد key=${key}، ضبطت تايمر (${debounceMs}ms).`);
 }
 
 module.exports = { handleIncomingMessage, queueIncomingMessage };
