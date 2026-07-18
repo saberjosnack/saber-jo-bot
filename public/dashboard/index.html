@@ -55,7 +55,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 
 function Switch({ on, onClick }) {
   return (
@@ -689,6 +689,9 @@ function MenuPanel({ bot, api }) {
   const [items, setItems] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [newName, setNewName] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState("");
+  const fileInputRef = useRef(null);
 
   const load = () => api(`/api/bots/${bot.id}/menu`).then((d) => { setItems(d); if (d.length && !selectedId) setSelectedId(d[0].id); });
   useEffect(() => { load(); }, [bot.id]);
@@ -697,6 +700,47 @@ function MenuPanel({ bot, api }) {
   const addItem = () => { if (!newName.trim()) return; const item = { id: Date.now(), name: newName.trim(), category: "عام", price: null, available: true, salesCount: 0, featured: false, description: "", featuredNote: "" }; save([...items, item]); setNewName(""); setSelectedId(item.id); };
   const update = (field, value) => save(items.map((i) => i.id === selectedId ? { ...i, [field]: value } : i));
   const selected = items.find((i) => i.id === selectedId);
+
+  const uploadImage = async (file) => {
+    if (!file || !selected) return;
+    setUploadErr(""); setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      const token = localStorage.getItem("sj_token");
+      const res = await fetch(`/api/bots/${bot.id}/menu/${selected.id}/image`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "فشل رفع الصورة.");
+      setItems((prev) => prev.map((i) => (i.id === selected.id ? { ...i, imageUrl: data.imageUrl } : i)));
+    } catch (err) {
+      setUploadErr(err.message || "فشل رفع الصورة.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const deleteImage = async () => {
+    if (!selected) return;
+    setUploadErr(""); setUploading(true);
+    try {
+      const token = localStorage.getItem("sj_token");
+      const res = await fetch(`/api/bots/${bot.id}/menu/${selected.id}/image`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || "فشل حذف الصورة."); }
+      setItems((prev) => prev.map((i) => (i.id === selected.id ? { ...i, imageUrl: null } : i)));
+    } catch (err) {
+      setUploadErr(err.message || "فشل حذف الصورة.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="grid2" style={{ gridTemplateColumns: "2fr 3fr", alignItems: "start" }}>
@@ -725,6 +769,24 @@ function MenuPanel({ bot, api }) {
           </div>
           <label className="small">الوصف</label>
           <div className="mb14"><textarea rows={3} value={selected.description} onChange={(e) => update("description", e.target.value)} /></div>
+
+          <label className="small">صورة الصنف (البوت بيبعتها تلقائياً للزبون لما يسأل عن الصنف)</label>
+          <div className="panel-2 flex gap10" style={{ alignItems: "center", marginBottom: 14 }}>
+            {selected.imageUrl ? (
+              <img src={selected.imageUrl} alt={selected.name} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)" }} />
+            ) : (
+              <div style={{ width: 72, height: 72, borderRadius: 8, border: "1px dashed var(--line)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "var(--ink-dim)", textAlign: "center" }}>ولا صورة</div>
+            )}
+            <div className="flexcol gap8">
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: "none" }} onChange={(e) => uploadImage(e.target.files?.[0])} />
+              <div className="flex gap8">
+                <button className="btn-ghost" disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? "جاري الرفع..." : selected.imageUrl ? "تغيير الصورة" : "رفع صورة"}</button>
+                {selected.imageUrl && <button className="btn-danger" disabled={uploading} onClick={deleteImage}>حذف الصورة</button>}
+              </div>
+              {uploadErr && <span style={{ fontSize: 12, color: "var(--red, #d9534f)" }}>{uploadErr}</span>}
+            </div>
+          </div>
+
           <div className="grid2 mb14">
             <div className="panel-2 flex" style={{ justifyContent: "space-between", alignItems: "center" }}><span style={{ fontSize: 13 }}>متوفر</span><Switch on={selected.available} onClick={() => update("available", !selected.available)} /></div>
             <div className="panel-2 flex" style={{ justifyContent: "space-between", alignItems: "center" }}><span style={{ fontSize: 13 }}>⭐ ركّز عليه البوت</span><Switch on={selected.featured} onClick={() => update("featured", !selected.featured)} /></div>

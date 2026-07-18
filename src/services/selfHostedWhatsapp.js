@@ -114,7 +114,15 @@ async function startBotConnection(botId) {
 
         if (!text && !image) continue;
 
-        queueIncomingMessage(botId, from, text, image, (to, t) => sendText(botId, to, t));
+        queueIncomingMessage(
+          botId,
+          from,
+          text,
+          image,
+          (to, t) => sendText(botId, to, t),
+          undefined,
+          (to, imageUrl) => sendImage(botId, to, imageUrl)
+        );
       } catch (err) {
         console.error(`خطأ بمعالجة رسالة للبوت ${botId}:`, err);
       }

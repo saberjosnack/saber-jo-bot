@@ -1,13 +1,27 @@
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const QRCode = require("qrcode");
 const store = require("../services/store");
 const botStore = require("../services/botStore");
 const metaAuth = require("../services/metaAuth");
+const env = require("../config/env");
 const { requireAuth, requireRole, requireBotAccess } = require("../middleware/auth");
 const wa = require("../services/selfHostedWhatsapp");
 
 const router = express.Router();
 router.use(requireAuth);
+
+// رفع صور الأصناف — بنخزنها بالذاكرة مؤقتاً لحد ما نكتبها لمجلد uploads يدوياً (فحص نوع/حجم الملف قبل الكتابة)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 ميغا كحد أقصى للصورة
+  fileFilter: (req, file, cb) => {
+    const ok = ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype);
+    cb(ok ? null : new Error("نوع الملف لازم يكون صورة (jpg/png/webp)."), ok);
+  },
+});
 router.use("/:id", requireBotAccess); // أي مسار فيه رقم بوت لازم يتأكد الموظف مسموحله فيه (المدير الكامل معفى دايماً)
 
 // ---------- قائمة البوتات ----------
@@ -227,6 +241,50 @@ router.put("/:id/menu", requireRole("owner", "orders"), (req, res) => {
   if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
   store.write(`configs/${bot.configId}/menu.json`, req.body);
   res.json({ message: "تم تحديث المنيو." });
+});
+
+// ---------- صورة صنف بالمنيو (البوت بيستخدمها ليرسلها تلقائياً للزبون لو الإعداد مفعّل) ----------
+// بنلف multer بدالة صغيرة عشان أي خطأ فيه (حجم/نوع الملف) يرجع JSON واضح للداشبورد بدل صفحة خطأ HTML عامة
+function uploadSingleImage(req, res, next) {
+  upload.single("image")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || "فشل رفع الصورة." });
+    next();
+  });
+}
+
+router.post("/:id/menu/:itemId/image", requireRole("owner", "orders"), uploadSingleImage, (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+  if (!req.file) return res.status(400).json({ error: "ما في صورة مرفوعة." });
+
+  const extByMime = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+  const ext = extByMime[req.file.mimetype] || "jpg";
+  const dir = path.join(__dirname, "..", "data", "uploads", "menu", bot.configId);
+  fs.mkdirSync(dir, { recursive: true });
+  const filename = `${req.params.itemId}.${ext}`;
+  fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+
+  // ?v= عشان نكسر أي كاش قديم لو المالك بدّل الصورة بعدين لنفس الصنف
+  const imageUrl = `${env.appBaseUrl}/uploads/menu/${bot.configId}/${filename}?v=${Date.now()}`;
+
+  const menu = store.read(`configs/${bot.configId}/menu.json`);
+  const itemId = Number(req.params.itemId);
+  const updated = menu.map((i) => (i.id === itemId ? { ...i, imageUrl } : i));
+  store.write(`configs/${bot.configId}/menu.json`, updated);
+
+  res.json({ imageUrl });
+});
+
+router.delete("/:id/menu/:itemId/image", requireRole("owner", "orders"), (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+
+  const menu = store.read(`configs/${bot.configId}/menu.json`);
+  const itemId = Number(req.params.itemId);
+  const updated = menu.map((i) => (i.id === itemId ? { ...i, imageUrl: null } : i));
+  store.write(`configs/${bot.configId}/menu.json`, updated);
+
+  res.json({ message: "تم حذف صورة الصنف." });
 });
 
 // ---------- إعدادات/برومبت البوت ----------

@@ -60,6 +60,44 @@ async function sendInstagramText(bot, recipientId, text) {
   return sendGraphMessage(token, recipientId, text);
 }
 
+// بيبعت صورة (متل صور الأصناف) عن طريق رابط عام — نفس Send API بس بمرفق image بدل نص
+async function sendGraphImage(pageAccessToken, recipientId, imageUrl) {
+  const url = `https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipient: { id: recipientId },
+      message: { attachment: { type: "image", payload: { url: imageUrl, is_reusable: true } } },
+      messaging_type: "RESPONSE",
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error(`[meta] فشل إرسال صورة (${res.status}):`, errBody);
+  }
+  return res;
+}
+
+async function sendMessengerImage(bot, recipientId, imageUrl) {
+  const token = bot?.metaChannels?.messenger?.pageAccessToken;
+  if (!token) {
+    console.error(`[meta] ما في Page Access Token مسجل لبوت "${bot?.name}" (ماسنجر) — ما قدرت أرسل الصورة.`);
+    return;
+  }
+  return sendGraphImage(token, recipientId, imageUrl);
+}
+
+async function sendInstagramImage(bot, recipientId, imageUrl) {
+  const token = bot?.metaChannels?.instagram?.pageAccessToken;
+  if (!token) {
+    console.error(`[meta] ما في Access Token مسجل لبوت "${bot?.name}" (انستجرام) — ما قدرت أرسل الصورة.`);
+    return;
+  }
+  return sendGraphImage(token, recipientId, imageUrl);
+}
+
 // مؤشر الكتابة مدعوم بماسنجر بس حالياً (انستجرام ما بيدعمه بنفس sender_action)
 async function sendMessengerTypingOn(bot, recipientId) {
   const token = bot?.metaChannels?.messenger?.pageAccessToken;
@@ -97,6 +135,8 @@ function verifySignature(rawBody, signatureHeader) {
 module.exports = {
   sendMessengerText,
   sendInstagramText,
+  sendMessengerImage,
+  sendInstagramImage,
   sendMessengerTypingOn,
   downloadMetaAttachment,
   verifySignature,

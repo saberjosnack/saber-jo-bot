@@ -113,9 +113,11 @@ router.post("/", async (req, res) => {
 
           // مؤشر "يكتب الآن..." مدعوم بماسنجر بس حالياً
           const onTypingStart = channel === "messenger" ? () => meta.sendMessengerTypingOn(bot, from) : undefined;
+          const sendImageFn = (to, imageUrl) =>
+            channel === "messenger" ? meta.sendMessengerImage(bot, to, imageUrl) : meta.sendInstagramImage(bot, to, imageUrl);
 
           trace(`أضفت الرسالة لطابور التجميع لبوت=${bot.id} from=${from}`);
-          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart);
+          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart, sendImageFn);
         } catch (err) {
           trace(`خطأ بمعالجة الحدث: ${err.message}\n${err.stack}`);
           console.error(`خطأ بمعالجة رسالة ${channel} واردة:`, err);

@@ -44,6 +44,17 @@ function computeHumanDelay(replyText, timing = DEFAULT_TIMING) {
   return Math.min(timing.maxDelayMs, timing.baseDelayMs + (replyText?.length || 0) * PER_CHAR_MS);
 }
 
+// أقصى عدد صور نبعتها تلقائياً على نفس الرد الواحد — حماية من إغراق الزبون بصور لو ذكر كذا صنف
+const MAX_AUTO_IMAGES_PER_REPLY = 2;
+
+// بيدوّر على أصناف "متوفرة" وعندها صورة محفوظة، واسمها مذكور حرفياً برسالة الزبون أو برد البوت.
+// مطابقة بسيطة بالنص (مش ذكاء اصطناعي) — كافية لأنو البوت أصلاً متعلّم يذكر اسم الصنف الحرفي من المنيو.
+function findMentionedItemsWithImages(menu, userText, replyText) {
+  const haystack = `${userText || ""} ${replyText || ""}`;
+  if (!haystack.trim()) return [];
+  return menu.filter((item) => item.available && item.imageUrl && item.name && haystack.includes(item.name));
+}
+
 /**
  * منطق معالجة أي رسالة واردة لأي بوت، بغض النظر عن مصدرها
  * (Green API, UltraMsg, Meta Cloud API, أو الاتصال المباشر self-hosted).
@@ -53,8 +64,9 @@ function computeHumanDelay(replyText, timing = DEFAULT_TIMING) {
  * @param {string} text - نص الرسالة (ممكن يكون فاضي لو الرسالة صورة بس)
  * @param {{base64:string, mediaType:string}|null} image - صورة أرسلها الزبون (اختياري)
  * @param {(to:string, text:string) => Promise<void>} sendText - دالة الإرسال الخاصة بهاد البوت
+ * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لإرسال صور الأصناف تلقائياً)
  */
-async function handleIncomingMessage(botId, from, text, image, sendText) {
+async function handleIncomingMessage(botId, from, text, image, sendText, sendImage) {
   trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} hasImage=${!!image}`);
   if (!from) return;
 
@@ -128,6 +140,21 @@ async function handleIncomingMessage(botId, from, text, image, sendText) {
     throw err;
   }
 
+  if (settings.sendImagesAutomatically && sendImage) {
+    try {
+      const menu = store.read(`configs/${bot.configId}/menu.json`);
+      const mentioned = findMentionedItemsWithImages(menu, text, reply).slice(0, MAX_AUTO_IMAGES_PER_REPLY);
+      for (const item of mentioned) {
+        trace(`handleIncomingMessage: بلشت إرسال صورة الصنف "${item.name}" لـ ${from}...`);
+        await sendImage(from, item.imageUrl);
+        trace(`handleIncomingMessage: نجح إرسال صورة الصنف "${item.name}" لـ ${from}.`);
+      }
+    } catch (err) {
+      trace(`handleIncomingMessage: فشل إرسال صورة صنف لـ ${from}: ${err.message}`);
+      console.error("[messageHandler] فشل إرسال صورة صنف تلقائياً:", err.message);
+    }
+  }
+
   history.push({ role: "user", content: text || "[صورة]" });
   history.push({ role: "assistant", content: reply });
   conversations[from] = history.slice(-20);
@@ -170,7 +197,7 @@ async function flushBuffer(key) {
 
   try {
     trace(`flushBuffer: بلشت handleIncomingMessage لـ ${key}`);
-    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText);
+    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText, buffer.sendImage);
     trace(`flushBuffer: خلص handleIncomingMessage لـ ${key} بنجاح.`);
   } catch (err) {
     trace(`flushBuffer: خطأ بمعالجة الرسائل المجمّعة لـ ${key}: ${err.message}\n${err.stack}`);
@@ -185,8 +212,9 @@ async function flushBuffer(key) {
  *
  * @param {() => Promise<void>} [onTypingStart] - اختياري: بينفّذ لما نبلش نعالج (قبل توليد الرد) —
  *   يستخدم لإظهار مؤشر "يكتب الآن..." (مدعوم حالياً بماسنجر/انستجرام).
+ * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لصور الأصناف التلقائية)
  */
-function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart) {
+function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart, sendImage) {
   if (!from) {
     trace(`queueIncomingMessage: تجاهلت — ما في from (botId=${botId}).`);
     return;
@@ -205,6 +233,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
     if (image) existing.image = image;
     existing.sendText = sendText;
     if (onTypingStart) existing.onTypingStart = onTypingStart;
+    if (sendImage) existing.sendImage = sendImage;
     clearTimeout(existing.timer);
     existing.timer = setTimeout(() => flushBuffer(key), debounceMs);
     trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، أعدت ضبط التايمر (${debounceMs}ms).`);
@@ -216,6 +245,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
     image: image || null,
     sendText,
     onTypingStart,
+    sendImage,
     timer: null,
   };
   buffer.timer = setTimeout(() => flushBuffer(key), debounceMs);

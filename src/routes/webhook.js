@@ -74,7 +74,15 @@ router.post(["/", "/:botId"], async (req, res) => {
     const onTypingStart =
       provider === "cloud" && parsed.messageId ? () => whatsapp.markReadWithTyping(bot, parsed.messageId) : undefined;
 
-    queueIncomingMessage(bot.id, parsed.from, text, image, (to, t) => whatsapp.sendText(bot, to, t), onTypingStart);
+    queueIncomingMessage(
+      bot.id,
+      parsed.from,
+      text,
+      image,
+      (to, t) => whatsapp.sendText(bot, to, t),
+      onTypingStart,
+      (to, imageUrl) => whatsapp.sendImage(bot, to, imageUrl)
+    );
     console.log(`[webhook] أضفت رسالة البوت "${bot.name}" لطابور التجميع.`);
   } catch (err) {
     console.error("خطأ بمعالجة رسالة واردة:", err);
