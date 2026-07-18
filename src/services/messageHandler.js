@@ -88,6 +88,18 @@ function upsertCustomerProfile(botId, from, order, items) {
   }
 }
 
+// بيبعت رسالة نصية لجروب واتساب — عن طريق مزود مستضاف (Wasender/UltraMsg/...) أو الاتصال المباشر (QR/Baileys)
+// حسب أي وحدة البوت فعلاً مربوط فيها. الاتصال المباشر بيدعم جروبات مجاناً بدون أي وسيط خارجي.
+// ملاحظة: require لـ selfHostedWhatsapp هون جوا الدالة (مش فوق بالملف) عشان نتفادى دورة استدعاء
+// دائرية بين الملفين (selfHostedWhatsapp.js أصلاً بيستدعي messageHandler.js فوق بالملف).
+async function sendToWhatsappGroup(bot, target, text) {
+  if (bot.waProvider === "selfhosted") {
+    const selfHostedWhatsapp = require("./selfHostedWhatsapp");
+    return selfHostedWhatsapp.sendText(bot.id, target, text);
+  }
+  return whatsapp.sendText(bot, target, text);
+}
+
 // بيسجل الطلب بلوحة التحكم، وإذا كان مفعّل بإعدادات "وجهة الطلبات"، بيبعت ملخصه لجروب واتساب مخصص للموظفين.
 // هاد الجروب (رقمه/معرّفه) مش موجود إطلاقاً بأي مكان يشوفه الموديل أو الزبون — هون بس بالكود، منفصل تماماً عن المحادثة.
 async function recordOrder(bot, from, channel, order) {
@@ -134,7 +146,7 @@ async function recordOrder(bot, from, channel, order) {
       ].filter(Boolean);
 
       try {
-        await whatsapp.sendText(bot, dest.target, summaryLines.join("\n"));
+        await sendToWhatsappGroup(bot, dest.target, summaryLines.join("\n"));
         trace(`recordOrder: بعت الطلب ${record.id} لجروب الواتساب (${dest.targetName || dest.target}).`);
       } catch (err) {
         trace(`recordOrder: فشل إرسال الطلب ${record.id} لجروب الواتساب: ${err.message}`);
@@ -172,7 +184,14 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
 
   if (bot.enabled === false) {
     trace(`handleIncomingMessage: البوت ${botId} موقوف يدوياً — وقفت.`);
-    return; // البوت موقوف يدوياً من الداشبورد (زر الإيقاف)
+    return; // البوت موقوف يدوياً من الداشبورد (زر الإيقاف العام)
+  }
+
+  // تشغيل/إيقاف كل منصة لحالها — لو القناة هاي محددة "موقوفة" صراحة (false)، منتجاهل الرسالة بدون ما نوقف باقي المنصات.
+  // ملاحظة: بوتات قديمة ما عندها channelEnabled أصلاً — بنعتبرها "شغالة" افتراضياً (undefined !== false).
+  if (bot.channelEnabled && bot.channelEnabled[channel] === false) {
+    trace(`handleIncomingMessage: قناة ${channel} موقوفة يدوياً لبوت ${botId} — وقفت.`);
+    return;
   }
 
   const settings = store.read(`configs/${bot.configId}/settings.json`);

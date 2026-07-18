@@ -58,7 +58,9 @@ function createBot(name, shareConfigFromBotId = null) {
     name,
     configId,
     status: "pending_connection", // لسا ما انربط بواتساب
-    enabled: true, // زر التشغيل/الإيقاف — true يعني البوت يرد عادي
+    enabled: true, // زر التشغيل/الإيقاف العام (يوقف كل المنصات دفعة وحدة) — true يعني البوت يرد عادي
+    // تشغيل/إيقاف كل منصة لحالها (مستقل عن بعض ومستقل عن "enabled" العام) — مثلاً تقدر تسكر انستجرام وتخلي واتساب شغال
+    channelEnabled: { whatsapp: true, messenger: true, instagram: true },
     waProvider: null, // null = يستخدم القيمة الافتراضية من إعدادات السيرفر (.env)
     waCredentials: {},
     metaChannels: {
@@ -143,6 +145,7 @@ function ensureDefaultBotExists() {
     configId: "default",
     status: "active",
     enabled: true,
+    channelEnabled: { whatsapp: true, messenger: true, instagram: true },
     waProvider: null, // بياخذ القيمة من .env تلقائياً
     waCredentials: {},
     metaChannels: {

@@ -99,6 +99,20 @@ router.post("/:id/start", requireRole("owner", "orders"), (req, res) => {
   }
 });
 
+// ---------- تشغيل/إيقاف كل منصة (واتساب/ماسنجر/انستجرام) لحالها لهاد البوت ----------
+// body: { channelEnabled: { whatsapp?: bool, messenger?: bool, instagram?: bool } }
+router.put("/:id/channels", requireRole("owner", "orders"), (req, res) => {
+  try {
+    const bot = botStore.getBot(req.params.id);
+    if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+    const current = bot.channelEnabled || { whatsapp: true, messenger: true, instagram: true };
+    const updated = botStore.updateBot(req.params.id, { channelEnabled: { ...current, ...req.body.channelEnabled } });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------- إعدادات الربط بواتساب (المزود والمفاتيح) — بدل ما تتعدل يدوياً من Render ----------
 router.get("/:id/connection", requireRole("owner"), (req, res) => {
   const bot = botStore.getBot(req.params.id);
@@ -344,7 +358,8 @@ router.get("/:id/whatsapp-groups", requireRole("owner"), async (req, res) => {
   const bot = botStore.getBot(req.params.id);
   if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
   try {
-    const groups = await whatsapp.getGroups(bot);
+    // الاتصال المباشر (QR/Baileys) بيدعم جروبات مجاناً بدون أي وسيط خارجي؛ وإلا منستخدم API المزود المستضاف
+    const groups = bot.waProvider === "selfhosted" ? await wa.getGroups(bot.id) : await whatsapp.getGroups(bot);
     res.json(groups);
   } catch (err) {
     res.status(400).json({ error: err.message });

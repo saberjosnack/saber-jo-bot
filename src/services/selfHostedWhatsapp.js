@@ -144,16 +144,30 @@ async function startAllActiveBots() {
   }
 }
 
+// معرّف جروب بواتساب دايماً منتهي بـ"@g.us" — لو كان هيك منبعته زي ما هو، وإلا منحطله لاحقة رقم شخص عادي
+function toJid(to) {
+  return to.includes("@g.us") || to.includes("@s.whatsapp.net") ? to : `${to}@s.whatsapp.net`;
+}
+
 async function sendText(botId, to, text) {
   const conn = connections.get(botId);
   if (!conn?.sock) throw new Error("هاد البوت مش متصل بواتساب بعد.");
-  await conn.sock.sendMessage(`${to}@s.whatsapp.net`, { text });
+  await conn.sock.sendMessage(toJid(to), { text });
 }
 
 async function sendImage(botId, to, imageUrl, caption = "") {
   const conn = connections.get(botId);
   if (!conn?.sock) throw new Error("هاد البوت مش متصل بواتساب بعد.");
-  await conn.sock.sendMessage(`${to}@s.whatsapp.net`, { image: { url: imageUrl }, caption });
+  await conn.sock.sendMessage(toJid(to), { image: { url: imageUrl }, caption });
+}
+
+// بيرجع قائمة جروبات الواتساب المتصلة بهاد البوت (ربط مباشر عن طريق QR) — مجاني بالكامل، بدون أي وسيط خارجي،
+// لأنه اتصال Baileys مباشر بواتساب نفسه.
+async function getGroups(botId) {
+  const conn = connections.get(botId);
+  if (!conn?.sock) throw new Error("هاد البوت مش متصل بواتساب بعد.");
+  const groupsMap = await conn.sock.groupFetchAllParticipating();
+  return Object.values(groupsMap).map((g) => ({ jid: g.id, name: g.subject }));
 }
 
 function getQrStatus(botId) {
@@ -162,4 +176,4 @@ function getQrStatus(botId) {
   return { status: conn.status, qr: conn.qr };
 }
 
-module.exports = { startBotConnection, startAllActiveBots, sendText, sendImage, getQrStatus };
+module.exports = { startBotConnection, startAllActiveBots, sendText, sendImage, getGroups, getQrStatus };

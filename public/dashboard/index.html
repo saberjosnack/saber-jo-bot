@@ -213,6 +213,14 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
   const [fbLoading, setFbLoading] = useState(false);
   const [fbError, setFbError] = useState("");
   const [showManual, setShowManual] = useState(false);
+  const [channelEnabled, setChannelEnabled] = useState({ whatsapp: true, messenger: true, instagram: true, ...(bot.channelEnabled || {}) });
+  useEffect(() => { setChannelEnabled({ whatsapp: true, messenger: true, instagram: true, ...(bot.channelEnabled || {}) }); }, [bot.id, bot.channelEnabled]);
+
+  const toggleChannel = async (key) => {
+    const updated = { ...channelEnabled, [key]: !channelEnabled[key] };
+    setChannelEnabled(updated);
+    await api(`/api/bots/${bot.id}/channels`, { method: "PUT", body: { channelEnabled: updated } });
+  };
 
   useEffect(() => {
     let stop = false;
@@ -308,6 +316,19 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
           <span className={`tag ${bot.enabled === false ? "tag-off" : "tag-on"}`}>{bot.enabled === false ? "موقوف" : "شغال"}</span>
         </div>
         <button className={bot.enabled === false ? "btn" : "btn-danger"} onClick={toggleBot}>{bot.enabled === false ? "▶ تشغيل البوت" : "⏸ إيقاف البوت"}</button>
+      </div>
+
+      <div className="panel">
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>تشغيل/إيقاف كل منصة لحالها</div>
+        <p style={{ fontSize: 12, color: "var(--ink-dim)", marginBottom: 12 }}>مثلاً تقدر تخلي واتساب شغال وتوقف انستجرام بس، من دون ما توقف البوت كامل من فوق.</p>
+        <div className="grid3">
+          {[["whatsapp", "💬 واتساب"], ["messenger", "📨 ماسنجر"], ["instagram", "📷 انستجرام"]].map(([key, label]) => (
+            <div key={key} className="panel-2 flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13 }}>{label}</span>
+              <Switch on={channelEnabled[key] !== false} onClick={() => toggleChannel(key)} />
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="panel" style={{ textAlign: "center" }}>
