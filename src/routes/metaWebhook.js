@@ -1,24 +1,12 @@
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
 const env = require("../config/env");
 const botStore = require("../services/botStore");
 const meta = require("../services/metaMessaging");
 const { queueIncomingMessage } = require("../services/messageHandler");
 const { transcribeAudio } = require("../services/speechToText");
+const { trace } = require("../services/trace");
 
 const router = express.Router();
-
-// سجل تتبع مؤقت وموثوق نكتب فيه كل خطوة، عشان صفحة اللوجز بالرندر كانت بترجع نتائج قديمة/مخزنة
-// ومش عم تعكس الطلبات الحقيقية اللحظية. منقدر نشوفه مباشرة من الـ Shell بالسيرفر (cat).
-const TRACE_FILE = path.join(__dirname, "..", "data", "webhook-trace.log");
-function trace(msg) {
-  try {
-    fs.appendFileSync(TRACE_FILE, `[${new Date().toISOString()}] ${msg}\n`, "utf8");
-  } catch (e) {
-    console.error("[meta-webhook] فشل الكتابة بملف التتبع:", e.message);
-  }
-}
 
 // ---------- تأكيد الـ Webhook من ميتا (خطوة لمرة وحدة وقت الربط) ----------
 router.get("/", (req, res) => {

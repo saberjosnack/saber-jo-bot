@@ -1,6 +1,7 @@
 const store = require("./store");
 const botStore = require("./botStore");
 const { generateReply } = require("./ai");
+const { trace } = require("./trace");
 
 // كم ثانية ننتظر بعد آخر رسالة قبل ما نبلش نرد — عشان لو الزبون بعت كذا رسالة قصيرة ورا بعض
 // (مثلاً كل كلمة بسطر لحالها) نجمعهم ونرد عليهم مرة وحدة، بدل ما نرد على كل جزء لحاله.
@@ -8,6 +9,17 @@ const DEBOUNCE_MS = 6000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// حماية من تعليق استدعاء الذكاء الاصطناعي إلى ما لا نهاية (مثلاً تعليق بالشبكة) —
+// لو ما رد خلال هاي المدة منرمي خطأ عادي، نقدر نمسكه ونرد برسالة احتياطية بدل ما يضل الرد عالق للأبد بصمت.
+const AI_TIMEOUT_MS = 25000;
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout بعد ${ms}ms بـ ${label}`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // تأخير "بشري" قبل إرسال الرد — يتناسب مع طول الرد (رد أطول = وقت "كتابة" أطول)، بحدود معقولة.
@@ -29,15 +41,20 @@ function computeHumanDelay(replyText) {
  * @param {(to:string, text:string) => Promise<void>} sendText - دالة الإرسال الخاصة بهاد البوت
  */
 async function handleIncomingMessage(botId, from, text, image, sendText) {
+  trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} hasImage=${!!image}`);
   if (!from) return;
 
   const bot = botStore.getBot(botId);
   if (!bot) {
+    trace(`handleIncomingMessage: ما لقيت بوت botId=${botId} — وقفت.`);
     console.error(`رسالة وصلت لبوت غير موجود: ${botId}`);
     return;
   }
 
-  if (bot.enabled === false) return; // البوت موقوف يدوياً من الداشبورد (زر الإيقاف)
+  if (bot.enabled === false) {
+    trace(`handleIncomingMessage: البوت ${botId} موقوف يدوياً — وقفت.`);
+    return; // البوت موقوف يدوياً من الداشبورد (زر الإيقاف)
+  }
 
   const settings = store.read(`configs/${bot.configId}/settings.json`);
   // ملاحظة: بعض البوتات القديمة (متل "default") انعمل إلها الملف تلقائياً كمصفوفة "[]" بدل كائن "{}"
@@ -49,32 +66,54 @@ async function handleIncomingMessage(botId, from, text, image, sendText) {
   const normalized = (text || "").trim();
 
   if (stopWords.some((w) => normalized === w)) {
+    trace(`handleIncomingMessage: كلمة إيقاف من ${from} — وقّفت المحادثة.`);
     paused[from] = { since: new Date().toISOString() };
     store.write(`bots/${botId}/pausedConversations.json`, paused);
     return;
   }
 
   if (resumeWords.some((w) => normalized === w)) {
+    trace(`handleIncomingMessage: كلمة استئناف من ${from} — رجّعت المحادثة.`);
     delete paused[from];
     store.write(`bots/${botId}/pausedConversations.json`, paused);
     return;
   }
 
-  if (paused[from]) return;
+  if (paused[from]) {
+    trace(`handleIncomingMessage: المحادثة مع ${from} موقوفة (تدخل بشري) — تجاهلت.`);
+    return;
+  }
 
   const conversationsRaw = store.read(`bots/${botId}/conversations.json`);
   const conversations = Array.isArray(conversationsRaw) ? {} : conversationsRaw;
   const history = conversations[from] || [];
 
-  const reply = await generateReply(history, text, image, bot.configId);
+  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length})...`);
+  let reply;
+  try {
+    reply = await withTimeout(generateReply(history, text, image, bot.configId), AI_TIMEOUT_MS, "generateReply");
+    trace(`handleIncomingMessage: رجع رد من generateReply لـ ${from} (replyLen=${reply?.length || 0}).`);
+  } catch (err) {
+    trace(`handleIncomingMessage: فشل generateReply لـ ${from}: ${err.message}\n${err.stack}`);
+    reply = "معليش، صار عندي خلل بسيط 🙏 جرب ابعت رسالتك كمان مرة بعد شوي.";
+  }
 
+  trace(`handleIncomingMessage: بلشت التأخير البشري قبل الإرسال لـ ${from}...`);
   await sleep(computeHumanDelay(reply));
-  await sendText(from, reply);
+  trace(`handleIncomingMessage: بلشت sendText لـ ${from}...`);
+  try {
+    await sendText(from, reply);
+    trace(`handleIncomingMessage: نجح sendText لـ ${from}.`);
+  } catch (err) {
+    trace(`handleIncomingMessage: فشل sendText لـ ${from}: ${err.message}\n${err.stack}`);
+    throw err;
+  }
 
   history.push({ role: "user", content: text || "[صورة]" });
   history.push({ role: "assistant", content: reply });
   conversations[from] = history.slice(-20);
   store.write(`bots/${botId}/conversations.json`, conversations);
+  trace(`handleIncomingMessage: خلصت وحفظت المحادثة مع ${from}.`);
 }
 
 // key: `${botId}::${from}` -> { parts, image, sendText, onTypingStart, timer }
@@ -85,26 +124,37 @@ function bufferKey(botId, from) {
 }
 
 async function flushBuffer(key) {
+  trace(`flushBuffer: انطلق التايمر لـ key=${key}`);
   const buffer = pendingBuffers.get(key);
-  if (!buffer) return;
+  if (!buffer) {
+    trace(`flushBuffer: ما لقيت buffer لـ key=${key} (تم مسحه قبلي؟) — وقفت.`);
+    return;
+  }
   pendingBuffers.delete(key);
 
   const separatorIndex = key.indexOf("::");
   const botId = key.slice(0, separatorIndex);
   const from = key.slice(separatorIndex + 2);
   const combinedText = buffer.parts.join("\n").trim();
+  trace(`flushBuffer: key=${key} partsCount=${buffer.parts.length} combinedTextLen=${combinedText.length} hasImage=${!!buffer.image} hasTypingFn=${!!buffer.onTypingStart}`);
 
   if (buffer.onTypingStart) {
     try {
+      trace(`flushBuffer: بلشت onTypingStart لـ ${key}`);
       await buffer.onTypingStart();
+      trace(`flushBuffer: خلص onTypingStart لـ ${key}`);
     } catch (err) {
+      trace(`flushBuffer: فشل onTypingStart لـ ${key}: ${err.message}`);
       console.error("[messageHandler] فشل إظهار مؤشر الكتابة:", err.message);
     }
   }
 
   try {
+    trace(`flushBuffer: بلشت handleIncomingMessage لـ ${key}`);
     await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText);
+    trace(`flushBuffer: خلص handleIncomingMessage لـ ${key} بنجاح.`);
   } catch (err) {
+    trace(`flushBuffer: خطأ بمعالجة الرسائل المجمّعة لـ ${key}: ${err.message}\n${err.stack}`);
     console.error(`[messageHandler] خطأ بمعالجة الرسائل المجمّعة لـ ${key}:`, err);
   }
 }
@@ -118,8 +168,14 @@ async function flushBuffer(key) {
  *   يستخدم لإظهار مؤشر "يكتب الآن..." (مدعوم حالياً بماسنجر/انستجرام).
  */
 function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart) {
-  if (!from) return;
-  if (!text && !image) return;
+  if (!from) {
+    trace(`queueIncomingMessage: تجاهلت — ما في from (botId=${botId}).`);
+    return;
+  }
+  if (!text && !image) {
+    trace(`queueIncomingMessage: تجاهلت — ما في نص ولا صورة (botId=${botId} from=${from}).`);
+    return;
+  }
 
   const key = bufferKey(botId, from);
   const existing = pendingBuffers.get(key);
@@ -131,6 +187,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
     if (onTypingStart) existing.onTypingStart = onTypingStart;
     clearTimeout(existing.timer);
     existing.timer = setTimeout(() => flushBuffer(key), DEBOUNCE_MS);
+    trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، أعدت ضبط التايمر (${DEBOUNCE_MS}ms).`);
     return;
   }
 
@@ -143,6 +200,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart)
   };
   buffer.timer = setTimeout(() => flushBuffer(key), DEBOUNCE_MS);
   pendingBuffers.set(key, buffer);
+  trace(`queueIncomingMessage: أنشأت بفر جديد key=${key}، ضبطت تايمر (${DEBOUNCE_MS}ms).`);
 }
 
 module.exports = { handleIncomingMessage, queueIncomingMessage };
