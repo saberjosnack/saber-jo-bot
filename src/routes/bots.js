@@ -323,6 +323,22 @@ router.get("/:id/orders", requireRole("owner", "orders", "viewer"), (req, res) =
   res.json(store.read(`bots/${req.params.id}/orders.json`));
 });
 
+// تحديث حالة طلب — مستخدم حالياً لزر "تم إرسال الطلب لشركة التوصيل" (بيحوّل الطلب لـ "مكتمل" ويطلعه من القائمة الحالية)
+// body: { status: "new" | "completed" }
+router.patch("/:id/orders/:orderId", requireRole("owner", "orders"), (req, res) => {
+  const { status } = req.body;
+  if (!["new", "completed"].includes(status)) {
+    return res.status(400).json({ error: "حالة الطلب لازم تكون new أو completed." });
+  }
+  const orders = store.read(`bots/${req.params.id}/orders.json`);
+  const idx = orders.findIndex((o) => o.id === req.params.orderId);
+  if (idx === -1) return res.status(404).json({ error: "الطلب غير موجود." });
+
+  orders[idx] = { ...orders[idx], status, completedAt: status === "completed" ? new Date().toISOString() : null };
+  store.write(`bots/${req.params.id}/orders.json`, orders);
+  res.json(orders[idx]);
+});
+
 // ---------- قائمة جروبات الواتساب — عشان المالك يختار جروب "وجهة الطلبات" من الداشبورد مباشرة ----------
 router.get("/:id/whatsapp-groups", requireRole("owner"), async (req, res) => {
   const bot = botStore.getBot(req.params.id);

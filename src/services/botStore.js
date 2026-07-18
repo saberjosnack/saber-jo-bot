@@ -91,7 +91,17 @@ function deleteBot(botId) {
 
 function defaultSettingsTemplate(employeeName) {
   return {
-    identity: { employeeName, open24h: false, openTime: "15:00", closeTime: "23:59", salesPower: "mid" },
+    identity: {
+      employeeName,
+      // اسم الشركة/المطعم وعنوانه ونوع نشاطه — لازم يتعبّى صح لكل بوت جديد، وإلا البوت رح يعرف حاله بمعلومات مطعم Saber Jo Snack افتراضياً
+      businessName: "",
+      businessAddress: "",
+      businessType: "توصيل واستلام بس، بدون تناول بالمكان",
+      open24h: false,
+      openTime: "15:00",
+      closeTime: "23:59",
+      salesPower: "mid",
+    },
     style: { tones: ["ودود"], emojiLevel: "low", responseLength: 400 },
     voice: { enabled: false, dialect: "الأردن", gender: "أنثى", voiceName: "رنا" },
     sendImagesAutomatically: true,

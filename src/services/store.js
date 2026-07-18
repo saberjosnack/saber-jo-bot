@@ -16,38 +16,22 @@ function ensureFile(file) {
   return p;
 }
 
+// ملاحظة أداء: كنا نطبع محتوى الملف كامل بالـ console.log على كل read/write — مع تعدد الزبائن بنفس الوقت
+// (كل رسالة بتعمل كذا read/write: إعدادات، منيو، محادثة، زبائن، طلبات...) هاد كان عبء حقيقي وبيبطئ
+// الرد لما يكون في أكتر من عميل بنفس الوقت (كتابة كونسول كبيرة بتحجز حلقة الأحداث). خليناها سطر وحدة مختصر.
 function read(file) {
   const p = ensureFile(file);
-
-  console.log("========== STORE READ ==========");
-  console.log("PATH:", p);
-
   const content = fs.readFileSync(p, "utf8");
-
-  console.log("CONTENT:");
-  console.log(content);
-
   return JSON.parse(content);
 }
 
 function write(file, data) {
   const p = ensureFile(file);
-
-  console.log("========== STORE WRITE ==========");
-  console.log("PATH:", p);
-  console.log("DATA:");
-  console.log(JSON.stringify(data, null, 2));
-
   fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
 }
 
 function exists(file) {
   const p = path.join(DATA_DIR, file);
-
-  console.log("========== STORE EXISTS ==========");
-  console.log("PATH:", p);
-  console.log("EXISTS:", fs.existsSync(p));
-
   return fs.existsSync(p);
 }
 
