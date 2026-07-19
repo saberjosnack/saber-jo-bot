@@ -139,6 +139,10 @@ const MAX_AUTO_IMAGES_PER_REPLY = 2;
 // بعت أكتر من هيك بنفس النافذة الزمنية، منكتفي بأول عدد منهم (حماية بسيطة من تضخم حجم الطلب/التكلفة).
 const MAX_INCOMING_IMAGES_PER_BATCH = 4;
 
+// نافذة زمنية لحماية recordOrder من تسجيل نفس الطلب أكتر من مرة (نفس الزبون + نفس الأصناف + نفس المجموع) —
+// بيصير هاد لو الذكاء الاصطناعي (أو الزبون) أكّد/كرر نفس الطلب بأكتر من رسالة قريبة من بعض فانسجل كذا مرة.
+const DUPLICATE_ORDER_WINDOW_MS = 10 * 60 * 1000; // 10 دقايق
+
 function normalizeSpaces(s) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
@@ -281,6 +285,27 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+
+    // حماية من تكرار نفس الطلب: نفس رقم الزبون + نفس الأصناف بالضبط + نفس المجموع، وانسجل قبل شوي
+    // (خلال آخر 10 دقايق) — هاد أقوى مؤشر إنو هاد نفس الطلب انسجل غلط أكتر من مرة، مش طلب جديد فعلي.
+    const dedupPhone = order.contactPhone || from;
+    const dedupItemsKey = items.join("|");
+    const dedupTotal = typeof order.totalPrice === "number" ? order.totalPrice : null;
+    const now = Date.now();
+    const isDuplicate = orders.some((o) => {
+      if (o.phone !== dedupPhone) return false;
+      if ((o.items || []).join("|") !== dedupItemsKey) return false;
+      if (o.total !== dedupTotal) return false;
+      const createdAtMs = new Date(o.createdAt).getTime();
+      return Number.isFinite(createdAtMs) && now - createdAtMs < DUPLICATE_ORDER_WINDOW_MS;
+    });
+
+    if (isDuplicate) {
+      trace(
+        `recordOrder: تجاهلت طلب مكرر (نفس الزبون/الأصناف/المجموع خلال ${Math.round(DUPLICATE_ORDER_WINDOW_MS / 60000)} دقايق) لبوت=${bot.id} from=${from}`
+      );
+      return;
+    }
 
     const record = {
       id: `ORD-${Date.now()}`,
