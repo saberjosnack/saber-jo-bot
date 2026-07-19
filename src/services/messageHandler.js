@@ -406,4 +406,4 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
   trace(`queueIncomingMessage: أنشأت بفر جديد key=${key}، ضبطت تايمر (${debounceMs}ms).`);
 }
 
-module.exports = { handleIncomingMessage, queueIncomingMessage };
+module.exports = { handleIncomingMessage, queueIncomingMessage, recordOrder };

@@ -10,6 +10,8 @@ const env = require("../config/env");
 const { requireAuth, requireRole, requireBotAccess } = require("../middleware/auth");
 const wa = require("../services/selfHostedWhatsapp");
 const whatsapp = require("../services/whatsapp");
+const { recordOrder } = require("../services/messageHandler");
+const { recoverMissedOrder, looksLikeMissedOrderConfirmation } = require("../services/ai");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -378,6 +380,109 @@ router.patch("/:id/orders/:orderId", requireRole("owner", "orders"), (req, res) 
   orders[idx] = { ...orders[idx], status, completedAt: status === "completed" ? new Date().toISOString() : null };
   store.write(`bots/${req.params.id}/orders.json`, orders);
   res.json(orders[idx]);
+});
+
+// ---------- استرجاع الطلبات "الضايعة" (زبون اتأكدله الطلب بالمحادثة بس ما انسجل فعلياً بلوحة التحكم) ----------
+// أداة تنظيف لمرة وحدة (مش ميزة دائمة) — بتفحص أرشيف المحادثات القديم لهاد البوت بس (معزول تماماً عن أي بوت تاني)
+// وبتحاول تسترجع أي طلب "ضاع" بنفس آلية الاسترجاع المستخدمة تلقائياً هلأ لأي طلب جديد (شوف ai.js/messageHandler.js).
+// افتراضياً بتشتغل "معاينة فقط" (dryRun) بدون ما تكتب أي شي — لازم ?apply=true صراحة عشان تسجل الطلبات فعلياً.
+router.post("/:id/recover-missed-orders", requireRole("owner"), async (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+
+  const apply = req.query.apply === "true";
+
+  try {
+    const conversationsRaw = store.read(`bots/${bot.id}/conversations.json`);
+    const conversations = Array.isArray(conversationsRaw) ? {} : conversationsRaw;
+
+    const ordersRaw = store.read(`bots/${bot.id}/orders.json`);
+    const orders = Array.isArray(ordersRaw) ? ordersRaw : [];
+
+    // كم طلب مسجل فعلياً لكل زبون (حسب رقم/معرّف التواصل) — عشان نقارنه بعدد مرات "التأكيد" بالمحادثة
+    const recordedCountByFrom = {};
+    for (const o of orders) {
+      const key = o.phone || "";
+      recordedCountByFrom[key] = (recordedCountByFrom[key] || 0) + 1;
+    }
+
+    const recovered = [];
+    const needsManualReview = [];
+    let scanned = 0;
+
+    for (const [from, messages] of Object.entries(conversations)) {
+      if (!Array.isArray(messages) || !messages.length) continue;
+      scanned++;
+
+      const confirmIndices = messages
+        .map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.role === "assistant" && looksLikeMissedOrderConfirmation(m.content))
+        .map(({ i }) => i);
+
+      if (!confirmIndices.length) continue;
+
+      const recordedCount = recordedCountByFrom[from] || 0;
+      const missingCount = confirmIndices.length - recordedCount;
+      if (missingCount <= 0) continue; // كل التأكيدات إلها طلبات مسجلة أصلاً (على الأقل بالعدد)
+
+      // منفترض إنو أقدم تأكيد (تأكيدات) هي يلي انسجلت فعلاً، والأحدث هي يلي "ضاعت" — نجرب نسترجع آخر missingCount منهم بس
+      const targetIndices = confirmIndices.slice(-missingCount);
+
+      for (const idx of targetIndices) {
+        const assistantReply = messages[idx].content;
+        // أقرب رسالة زبون قبل هاد التأكيد
+        let userIdx = idx - 1;
+        while (userIdx >= 0 && messages[userIdx].role !== "user") userIdx--;
+        if (userIdx < 0) {
+          needsManualReview.push({ from, reason: "ما لقيت رسالة الزبون قبل التأكيد", messageIndex: idx });
+          continue;
+        }
+        const userMessage = messages[userIdx].content;
+        const history = messages.slice(0, userIdx);
+
+        try {
+          const order = await recoverMissedOrder(bot.configId, history, userMessage, assistantReply);
+          if (!order) {
+            needsManualReview.push({ from, reason: "الذكاء الاصطناعي ما قدر يستخرج تفاصيل الطلب", messageIndex: idx });
+            continue;
+          }
+
+          const channel = from.length <= 15 ? "whatsapp" : "messenger_or_instagram";
+          const preview = {
+            from,
+            channel,
+            itemsSummary: order.itemsSummary,
+            area: order.area,
+            totalPrice: order.totalPrice ?? null,
+            customerName: order.customerName || "",
+            assistantReplyPreview: (assistantReply || "").slice(0, 80),
+          };
+
+          if (apply) {
+            await recordOrder(bot, from, channel, order);
+            recovered.push({ ...preview, saved: true });
+          } else {
+            recovered.push({ ...preview, saved: false });
+          }
+        } catch (err) {
+          needsManualReview.push({ from, reason: `فشل الاسترجاع: ${err.message}`, messageIndex: idx });
+        }
+      }
+    }
+
+    res.json({
+      botId: bot.id,
+      botName: bot.name,
+      mode: apply ? "applied" : "dryRun",
+      conversationsScanned: scanned,
+      recoveredCount: recovered.length,
+      recovered,
+      needsManualReview,
+    });
+  } catch (err) {
+    console.error("[recover-missed-orders] خطأ عام:", err);
+    res.status(500).json({ error: "فشل فحص الطلبات الضايعة: " + err.message });
+  }
 });
 
 // ---------- سجل المحادثات (تبويب "المحادثات" بالداشبورد) — عشان نتأكد شو استقبل/رد البوت فعلياً لكل زبون،
