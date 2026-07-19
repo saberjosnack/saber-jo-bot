@@ -7,6 +7,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <style>
   :root {
     --bg: #14161c; --panel: #1d2027; --panel-2: #242832; --line: #333743;
@@ -50,6 +52,7 @@
   .gap8 { gap: 8px; } .gap10 { gap: 10px; } .gap14 { gap: 14px; }
   .mb8 { margin-bottom: 8px; } .mb14 { margin-bottom: 14px; } .mb20 { margin-bottom: 20px; }
   label.small { font-size: 12px; color: var(--ink-dim); display: block; margin-bottom: 4px; }
+  .branch-map { width: 100%; height: 320px; border-radius: 8px; border: 1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -606,10 +609,13 @@ function StylePanel({ bot, api, refreshBots }) {
               <Switch on={!!s.identity.open24h} onClick={() => setS({ ...s, identity: { ...s.identity, open24h: !s.identity.open24h } })} />
             </div>
             {!s.identity.open24h && (
-              <div className="flex gap8">
-                <div style={{ flex: 1 }}><label className="small">فتح</label><input type="time" value={s.identity.openTime} onChange={(e) => setS({ ...s, identity: { ...s.identity, openTime: e.target.value } })} /></div>
-                <div style={{ flex: 1 }}><label className="small">إغلاق</label><input type="time" value={s.identity.closeTime} onChange={(e) => setS({ ...s, identity: { ...s.identity, closeTime: e.target.value } })} /></div>
-              </div>
+              <>
+                <div className="flex gap8">
+                  <div style={{ flex: 1 }}><label className="small">فتح</label><input type="time" value={s.identity.openTime} onChange={(e) => setS({ ...s, identity: { ...s.identity, openTime: e.target.value } })} /></div>
+                  <div style={{ flex: 1 }}><label className="small">إغلاق</label><input type="time" value={s.identity.closeTime} onChange={(e) => setS({ ...s, identity: { ...s.identity, closeTime: e.target.value } })} /></div>
+                </div>
+                <div className="small" style={{ color: "var(--ink-dim)", marginTop: 4 }}>لو وقت الإغلاق قبل وقت الفتح (مثلاً فتح 3 العصر وسكر 4:30 فجراً)، البوت بيفهمها تلقائياً إنها بتمتد لبعد نص الليل لليوم التاني — بدون أي إعداد إضافي.</div>
+              </>
             )}
           </div>
         </div>
@@ -1069,6 +1075,54 @@ function DeliveryPanel({ bot, api }) {
 }
 
 const emptyBranch = () => ({ id: `branch-${Date.now()}`, name: "", lat: "", lng: "", address: "", mapLink: "", open24h: false, openTime: "15:00", closeTime: "23:59" });
+const AMMAN_CENTER = [31.9539, 35.9106];
+
+// خريطة حية (OpenStreetMap عن طريق Leaflet) بدبوس قابل للسحب — عشان تحدد موقع الفرع بالضبط بدل ما تدور
+// على الإحداثيات يدوياً. دوس بأي مكان بالخريطة أو اسحب الدبوس، ومنحدّث خط العرض/الطول تلقائياً.
+function BranchMapPicker({ lat, lng, onChange, branchKey }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current || typeof L === "undefined") return;
+    const map = L.map(containerRef.current).setView(AMMAN_CENTER, 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+    const marker = L.marker(AMMAN_CENTER, { draggable: true }).addTo(map);
+    marker.on("dragend", () => { const pos = marker.getLatLng(); onChangeRef.current(pos.lat, pos.lng); });
+    map.on("click", (e) => { marker.setLatLng(e.latlng); onChangeRef.current(e.latlng.lat, e.latlng.lng); });
+    mapRef.current = map;
+    markerRef.current = marker;
+    setTimeout(() => map.invalidateSize(), 200);
+    return () => { map.remove(); mapRef.current = null; markerRef.current = null; };
+  }, []);
+
+  // لما نبدل الفرع المختار، نعيد توسيط الخريطة على موقعه (أو وسط عمّان لو ما عندوش إحداثيات بعد)
+  useEffect(() => {
+    if (!mapRef.current || !markerRef.current) return;
+    const latNum = Number(lat), lngNum = Number(lng);
+    const hasPoint = lat !== "" && lng !== "" && !Number.isNaN(latNum) && !Number.isNaN(lngNum);
+    const point = hasPoint ? [latNum, lngNum] : AMMAN_CENTER;
+    mapRef.current.setView(point, hasPoint ? 16 : 12);
+    markerRef.current.setLatLng(point);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchKey]);
+
+  // لو تغيّرت الإحداثيات (كتابة يدوية بالحقول)، نحرّك الدبوس بس بدون ما نلغي تمركز المستخدم بالخريطة
+  useEffect(() => {
+    if (!markerRef.current) return;
+    const latNum = Number(lat), lngNum = Number(lng);
+    if (lat === "" || lng === "" || Number.isNaN(latNum) || Number.isNaN(lngNum)) return;
+    markerRef.current.setLatLng([latNum, lngNum]);
+  }, [lat, lng]);
+
+  return <div ref={containerRef} className="branch-map" />;
+}
 
 function BranchesPanel({ bot, api }) {
   const [branches, setBranches] = useState([]);
@@ -1079,7 +1133,9 @@ function BranchesPanel({ bot, api }) {
 
   const save = async (updated) => { setBranches(updated); await api(`/api/bots/${bot.id}/branches`, { method: "PUT", body: updated }); };
   const addBranch = () => { const b = emptyBranch(); setBranches([...branches, b]); setSelectedId(b.id); };
-  const update = (field, value) => setBranches(branches.map((b) => (b.id === selectedId ? { ...b, [field]: value } : b)));
+  const updateFields = (patch) => setBranches(branches.map((b) => (b.id === selectedId ? { ...b, ...patch } : b)));
+  const update = (field, value) => updateFields({ [field]: value });
+  const setMapPosition = (newLat, newLng) => updateFields({ lat: Number(newLat.toFixed(6)), lng: Number(newLng.toFixed(6)) });
   const selected = branches.find((b) => b.id === selectedId);
 
   const saveAll = async () => {
@@ -1126,12 +1182,16 @@ function BranchesPanel({ bot, api }) {
             <div><label className="small">اسم الفرع</label><input value={selected.name} onChange={(e) => update("name", e.target.value)} placeholder="مثال: شارع الجامعة" /></div>
             <div><label className="small">العنوان</label><input value={selected.address} onChange={(e) => update("address", e.target.value)} placeholder="عنوان الفرع بالتفصيل" /></div>
           </div>
+          <label className="small">حدد موقع الفرع على الخريطة (دوس بالمكان الصحيح أو اسحب الدبوس)</label>
+          <div className="mb14">
+            <BranchMapPicker lat={selected.lat} lng={selected.lng} onChange={setMapPosition} branchKey={selected.id} />
+          </div>
           <div className="grid2 mb14">
             <div><label className="small">خط العرض (lat)</label><input dir="ltr" value={selected.lat} onChange={(e) => update("lat", e.target.value)} placeholder="مثال: 31.9539" /></div>
             <div><label className="small">خط الطول (lng)</label><input dir="ltr" value={selected.lng} onChange={(e) => update("lng", e.target.value)} placeholder="مثال: 35.9106" /></div>
           </div>
           <div className="small" style={{ color: "var(--ink-dim)", marginBottom: 14 }}>
-            احصل على الإحداثيات من خرائط جوجل: افتح موقع الفرع بالخريطة، دوس زر يمين على المكان بالضبط، وانسخ الرقمين يلي بيطلعوا (خط العرض، خط الطول).
+            الطريقة الأسهل: حدد الموقع مباشرة عالخريطة فوق. أو بديل يدوي: افتح خرائط جوجل، دوس زر يمين على مكان الفرع بالضبط، وانسخ الرقمين يلي بيطلعوا (خط العرض، خط الطول) هون.
           </div>
           <div className="mb14"><label className="small">رابط خرائط جوجل (اختياري)</label><input dir="ltr" value={selected.mapLink} onChange={(e) => update("mapLink", e.target.value)} placeholder="https://maps.app.goo.gl/..." /></div>
 
@@ -1141,10 +1201,13 @@ function BranchesPanel({ bot, api }) {
               <Switch on={!!selected.open24h} onClick={() => update("open24h", !selected.open24h)} />
             </div>
             {!selected.open24h && (
-              <div className="flex gap8">
-                <div style={{ flex: 1 }}><label className="small">فتح</label><input type="time" value={selected.openTime} onChange={(e) => update("openTime", e.target.value)} /></div>
-                <div style={{ flex: 1 }}><label className="small">إغلاق</label><input type="time" value={selected.closeTime} onChange={(e) => update("closeTime", e.target.value)} /></div>
-              </div>
+              <>
+                <div className="flex gap8">
+                  <div style={{ flex: 1 }}><label className="small">فتح</label><input type="time" value={selected.openTime} onChange={(e) => update("openTime", e.target.value)} /></div>
+                  <div style={{ flex: 1 }}><label className="small">إغلاق</label><input type="time" value={selected.closeTime} onChange={(e) => update("closeTime", e.target.value)} /></div>
+                </div>
+                <div className="small" style={{ color: "var(--ink-dim)", marginTop: 4 }}>لو وقت الإغلاق قبل وقت الفتح (مثلاً فتح 3 العصر وسكر 4:30 فجراً)، بتمتد تلقائياً لبعد نص الليل لليوم التاني — بدون أي إعداد إضافي.</div>
+              </>
             )}
           </div>
 
