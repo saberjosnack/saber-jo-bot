@@ -1247,6 +1247,26 @@ function EmployeesPanel({ api, allBots }) {
     load();
   };
 
+  const changeRole = async (emp, newRole) => {
+    if (newRole === emp.role) return;
+    try {
+      await api(`/api/dashboard/employees/${emp.id}/role`, { method: "PUT", body: { role: newRole } });
+      load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const deleteEmployee = async (emp) => {
+    if (!confirm(`متأكد بدك تحذف "${emp.name}"؟ رح يفقد وصوله للداشبورد فوراً.`)) return;
+    try {
+      await api(`/api/dashboard/employees/${emp.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   return (
     <div className="flexcol gap14">
       <div className="panel">
@@ -1296,9 +1316,12 @@ function EmployeesPanel({ api, allBots }) {
             <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
               <span>{e.name} — {e.email}</span>
               <div className="flex gap8" style={{ alignItems: "center" }}>
-                <span className="tag tag-pending">{ROLES.find(r => r[0] === e.role)?.[1] || e.role}</span>
+                <select value={e.role} onChange={(ev) => changeRole(e, ev.target.value)}>
+                  {ROLES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                </select>
                 <span className={`tag ${e.status === "active" ? "tag-on" : "tag-off"}`}>{e.status === "active" ? "نشط" : "دعوة معلقة"}</span>
                 <button className="btn-ghost" onClick={() => { setPwFor(pwFor === e.id ? null : e.id); setPwValue(""); }}>🔑 كلمة مرور</button>
+                <button className="btn-ghost" onClick={() => deleteEmployee(e)}>🗑 حذف</button>
               </div>
             </div>
 
