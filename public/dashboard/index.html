@@ -697,7 +697,23 @@ function StylePanel({ bot, api }) {
                 {groups && groups.length > 0 && (
                   <div className="flexcol gap8" style={{ marginTop: 10, maxHeight: 260, overflowY: "auto" }}>
                     {groups.map((g) => (
-                      <div key={g.jid} className="panel-2" style={{ cursor: "pointer" }} onClick={() => setS({ ...s, orderDestination: { ...s.orderDestination, target: g.jid, targetName: g.name } })}>
+                      <div
+                        key={g.jid}
+                        className="panel-2"
+                        style={{ cursor: "pointer" }}
+                        onClick={async () => {
+                          // نحفظ فوراً وقت الاختيار — قبل هاد الإصلاح كان الاختيار بيضل بس بذاكرة الصفحة
+                          // لحد ما تدوس "حفظ كل التعديلات" تحت، وين ممكن حدا ينساها ويظن إنو الجروب انحفظ
+                          // بس فعلياً الطلبات ما رح تنبعثله أبداً (recordOrder بيتجاهل الإرسال بصمت لو الهدف فاضي).
+                          const updated = { ...s, orderDestination: { ...s.orderDestination, target: g.jid, targetName: g.name } };
+                          setS(updated);
+                          try {
+                            await api(`/api/bots/${bot.id}/settings`, { method: "PUT", body: updated });
+                          } catch (err) {
+                            alert(`اخترنا "${g.name || g.jid}" بس صار خطأ بالحفظ: ${err.message} — دوس "حفظ كل التعديلات" تحت للتأكد إنو انحفظ.`);
+                          }
+                        }}
+                      >
                         {g.name || g.jid}
                       </div>
                     ))}
