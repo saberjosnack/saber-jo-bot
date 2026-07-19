@@ -76,10 +76,49 @@ function buildDiscountSection(discountContext) {
   return lines.join("\n");
 }
 
+// قائمة الفروع (بدون سقف عدد — البوت بيدعم فرع واحد أو أكتر بنفس الطريقة) — بتظهر بالبرومبت عشان البوت
+// يعرف يجاوب عن عناوين الاستلام وساعات كل فرع لحاله، ويستخدمها كمان لحساب أقرب فرع لموقع الزبون (deliveryCalc.js).
+function buildBranchesSection(branches, nowJordan = new Date()) {
+  if (!Array.isArray(branches) || !branches.length) return "";
+  const lines = branches.map((b) => {
+    const open = b.open24h ? true : b.openTime && b.closeTime ? isOpenNow(b.openTime, b.closeTime, nowJordan) : true;
+    const hours = b.open24h ? "24 ساعة" : b.openTime && b.closeTime ? `${b.openTime} - ${b.closeTime}` : "غير محدد";
+    const status = open ? "فاتح هلأ" : "مسكر هلأ";
+    return `- ${b.name}: ${b.address || "بدون عنوان مسجل"}${b.mapLink ? ` (رابط خرائط: ${b.mapLink})` : ""} — الدوام: ${hours} (${status})`;
+  });
+  return `فروع ${branches.length > 1 ? "المحل المتاحة" : "المحل"} (للاستلام أو كمرجع أقرب فرع للتوصيل):\n${lines.join("\n")}`;
+}
+
+// موقع مباشر بعته الزبون (Live/Pin Location) — محسوب سلفاً بالكود (deliveryCalc.js)، مش بالذكاء الاصطناعي،
+// عشان رسم التوصيل يكون دقيق دايماً بدل ما يتخمّن. منفصل عن البرومبت الثابت (بدون cache_control) لنفس سبب
+// بلوكات الزبون/الخصم فوق — خاص بهالرسالة بس، وممكن يختلف كل مرة الزبون يبعت موقع جديد.
+function buildLocationSection(locationContext) {
+  if (!locationContext) return "";
+  const { address, branch, distanceKm, fee, estimated } = locationContext;
+  const lines = [
+    "الزبون بعت موقعه المباشر (📍 Live Location) من واتساب/ماسنجر — اعتمد هاي المعلومات المحسوبة تلقائياً كمنطقة/عنوان توصيله، ولا تسأله يكتب منطقته من جديد:",
+  ];
+  if (address) lines.push(`- العنوان التقريبي حسب الموقع المُرسل: ${address}`);
+  if (branch) {
+    lines.push(
+      `- أقرب فرع لموقعه: ${branch.name}${typeof distanceKm === "number" ? ` (${distanceKm} كم عن طريق الطريق الفعلي${estimated ? " — تقدير تقريبي" : ""})` : ""}`
+    );
+  }
+  if (typeof fee === "number") {
+    lines.push(`- رسم التوصيل المحسوب فعلياً لهالموقع: ${fee} د.أ — استخدم هالرقم بالضبط بمجموع الطلب، بدون أي تعديل أو تقريب إضافي منك.`);
+  } else {
+    lines.push(
+      "- ما قدرنا نحسب رسم توصيل دقيق لهالموقع (بعيد جداً عن كل الفروع المسجلة أو صار خطأ بالحساب) — اعتذر للزبون بلطف وقوله التوصيل مش مؤكد إلها حالياً، واعرض الاستلام من الفرع أو خذ منه تفاصيل إضافية."
+    );
+  }
+  return lines.join("\n");
+}
+
 function buildSystemPrompt(configId = "default") {
   const settings = store.read(`configs/${configId}/settings.json`);
   const menu = store.read(`configs/${configId}/menu.json`);
   const fees = store.read(`configs/${configId}/deliveryFees.json`);
+  const branches = store.exists(`configs/${configId}/branches.json`) ? store.read(`configs/${configId}/branches.json`) : [];
 
   const { identity, style, guardrails, customRules, prompt } = settings;
 
@@ -108,6 +147,7 @@ function buildSystemPrompt(configId = "default") {
   // بنعلم الذكاء الاصطناعي إنو فيه إمكانية إرسال صور تلقائياً بس لو الميزة مفعّلة فعلاً وفي صنف واحد ع الأقل
   // عندو صورة محفوظة — وإلا بيوعد الزبون بصورة ما رح توصله (شوف findMentionedItemsWithImages بـ messageHandler.js).
   const hasMenuImages = Boolean(settings.sendImagesAutomatically) && menu.some((item) => item.imageUrl);
+  const branchesText = buildBranchesSection(branches);
 
   return `
 قواعد صارمة قبل أي شي (لو تعارضت مع أي تعليمة تانية بالبرومبت، هاي القواعد تفوز دايماً):
@@ -120,6 +160,7 @@ function buildSystemPrompt(configId = "default") {
 7. قاعدة غير قابلة للنقاش: ممنوع تمنعاً باتاً تكتب للزبون أي جملة فيها معنى "تم تسجيل طلبك" أو "تم تأكيد طلبك" أو "طلبك انسجل بنجاح" أو أي صياغة مشابهة إلا إذا استدعيت أداة record_order بنفس هالرد بالضبط. الجملة والأداة لازم يصيروا مع بعض دائماً — ما تنفصلوا أبداً. لو حابب تأكد للزبون قبل ما تكون جاهز تستدعي الأداة، استخدم صياغة غير نهائية زي "تمام، خليني أسجللك الطلب" بدل "تم تسجيله".
 ${hasMenuImages ? `8. لو الزبون طلب صورة صنف (أو ذكرت إنت صنف عندو صورة بردك)، ما تقول أبداً "ما عندي إمكانية إرسال صور" — النظام بيرسل صورة الصنف تلقائياً بعد ردك لو ذكرت اسمه (حتى الاسم التجاري المختصر بكفي، مش لازم الاسم الكامل من المنيو). اذكر اسم الصنف بوضوح برد طبيعي (مثال: "تمام، هاي صورة رويال سليم 👇") بدل ما تعتذر عن عدم القدرة على إرسال صور.` : ""}
 9. لو الزبون قال إنو عنده كود خصم بس ما ظهرلك قسم "خصم الزبون" منفصل بالأسفل يأكده، اطلب منه يكتب الكود بالضبط برسالة لحاله (بدون كلام إضافي حواليه) عشان تقدر تتأكد منه. ما تفترض أبداً إنو الكود صحيح أو تطبق أي خصم من عندك — بس اعتمد على قسم "خصم الزبون" لو ظهر.
+10. لو الزبون بعت موقعه المباشر (Live Location) من واتساب أو ماسنجر، رح يظهرلك قسم منفصل بالأسفل فيه العنوان التقريبي وأقرب فرع ورسم التوصيل المحسوب فعلياً لهالموقع — اعتمد هالرقم بالضبط ولا تسأل الزبون عن منطقته من جديد. لو ما ظهر هيك قسم، اسأل الزبون عن منطقته بالكتابة زي العادة أو اقترح عليه يبعت موقعه المباشر (📍) عشان تحسبله رسم توصيل أدق.
 
 اسمك "${identity.employeeName}" — موظف بشري بـ${identity.businessName || "مطعم Saber Jo Snack"}${identity.businessAddress ? ` (${identity.businessAddress})` : " بعمّان (فرع طلوع الحوانا، شارع الجامعة الأردنية)"}. ${identity.businessType || "توصيل واستلام بس، بدون تناول بالمكان"}.
 
@@ -135,8 +176,8 @@ ${open ? "" : `إذا سأل الزبون عن الطلب هلأ، أخبره ب
 قائمة المنيو الحالية (السعر والتوفر من النظام مباشرة، ما تخترع غيرها):
 ${menuText}
 
-مناطق التوصيل مسجلة برسوم ثابتة لكل منطقة (${fees.length} منطقة بالنظام). اسأل عن المنطقة بالضبط قبل ما تأكد أي سعر توصيل، وإذا المنطقة مش موجودة بالنظام، اعتذر وقول التوصيل مش متاح إلها واعرض الاستلام من الفرع.
-
+مناطق التوصيل مسجلة برسوم ثابتة لكل منطقة (${fees.length} منطقة بالنظام) — تستخدمها لو الزبون كتب منطقته بالنص. لو الزبون بعت موقعه المباشر، الرسم بينحسب تلقائياً بدقة أكتر حسب المسافة الفعلية (شوف القاعدة 10 فوق) وبتلاقيه بقسم منفصل بالأسفل. إذا المنطقة يلي كتبها الزبون مش موجودة بالنظام ولا بعت موقعه، اعتذر وقول التوصيل مش مؤكد إلها واعرض الاستلام من الفرع، أو اقترح عليه يبعت موقعه المباشر (📍) نحسبله السعر بالضبط.
+${branchesText ? `\n${branchesText}\n` : ""}
 حواجز الأمان:
 ${guardrailText}
 
@@ -147,4 +188,4 @@ ${prompt}
 `.trim();
 }
 
-module.exports = { buildSystemPrompt, buildCustomerProfileSection, buildDiscountSection, isOpenNow };
+module.exports = { buildSystemPrompt, buildCustomerProfileSection, buildDiscountSection, buildLocationSection, isOpenNow };

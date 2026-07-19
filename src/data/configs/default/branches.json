@@ -1,0 +1,24 @@
+[
+  {
+    "id": "branch-university-street",
+    "name": "شارع الجامعة",
+    "lat": 32.022543300380285,
+    "lng": 35.85542726646626,
+    "address": "عمان، شارع الجامعة، إشارة الدوريات، طلوع هافانا، آخر الطلوع على الشمال",
+    "mapLink": "https://maps.app.goo.gl/HERCSBtMzxKr9pu26",
+    "open24h": false,
+    "openTime": "15:00",
+    "closeTime": "04:30"
+  },
+  {
+    "id": "branch-jabal-hussein",
+    "name": "جبل الحسين",
+    "lat": 31.97411377035281,
+    "lng": 35.91758199868314,
+    "address": "عمان، جبل الحسين، شارع نابلس، بعد مدرسة عكا",
+    "mapLink": "https://maps.app.goo.gl/Frj1QYoYsmpUGrt89",
+    "open24h": false,
+    "openTime": "15:00",
+    "closeTime": "04:30"
+  }
+]

@@ -3,6 +3,11 @@ const botStore = require("./botStore");
 const { generateReply, recoverMissedOrder, looksLikeMissedOrderConfirmation } = require("./ai");
 const whatsapp = require("./whatsapp");
 const { trace } = require("./trace");
+const deliveryCalc = require("./deliveryCalc");
+
+// مهلة قصوى لحساب توصيل الموقع المباشر (OSRM + Nominatim) — لو تأخرت الشبكة، ما بدنا نعلّق كل الرد
+// عليها، منكمل بمعلومات ناقصة (بدون عنوان/رسم) بدل ما نوقف الرد بالكامل.
+const LOCATION_CALC_TIMEOUT_MS = 9000;
 
 // قيم افتراضية لو ما في إعدادات "سرعة الرد" محفوظة أصلاً (بوتات قديمة قبل ما ضفنا هاي الميزة)
 const DEFAULT_TIMING = { debounceMs: 6000, baseDelayMs: 1200, maxDelayMs: 6000 };
@@ -71,6 +76,30 @@ function findMentionedItemsWithImages(menu, userText, replyText) {
     }
     return false;
   });
+}
+
+// بيرجع آخر موقع مباشر بعته الزبون (لو بعت واحد قبل هيك بنفس المحادثة) — عشان لو بعت موقعه برسالة
+// وأكد الطلب برسالة تانية بعدها (بدون ما يعيد يبعت الموقع)، البوت لسا يعرف رسم التوصيل المحسوب الصحيح.
+function getStoredLocation(botId, from) {
+  try {
+    const raw = store.exists(`bots/${botId}/customerLocations.json`) ? store.read(`bots/${botId}/customerLocations.json`) : {};
+    const locations = Array.isArray(raw) ? {} : raw;
+    return locations[from] || null;
+  } catch (err) {
+    console.error("[messageHandler] فشل قراءة موقع الزبون المحفوظ:", err.message);
+    return null;
+  }
+}
+
+function saveStoredLocation(botId, from, locationContext) {
+  try {
+    const raw = store.exists(`bots/${botId}/customerLocations.json`) ? store.read(`bots/${botId}/customerLocations.json`) : {};
+    const locations = Array.isArray(raw) ? {} : raw;
+    locations[from] = { ...locationContext, updatedAt: new Date().toISOString() };
+    store.write(`bots/${botId}/customerLocations.json`, locations);
+  } catch (err) {
+    console.error("[messageHandler] فشل حفظ موقع الزبون:", err.message);
+  }
 }
 
 // بيرجع بيانات الزبون المحفوظة من طلب سابق (لو موجودة) — عشان البوت يتعرف على الزبون الراجع
@@ -149,7 +178,9 @@ async function sendToWhatsappGroup(bot, target, text) {
 
 // بيسجل الطلب بلوحة التحكم، وإذا كان مفعّل بإعدادات "وجهة الطلبات"، بيبعت ملخصه لجروب واتساب مخصص للموظفين.
 // هاد الجروب (رقمه/معرّفه) مش موجود إطلاقاً بأي مكان يشوفه الموديل أو الزبون — هون بس بالكود، منفصل تماماً عن المحادثة.
-async function recordOrder(bot, from, channel, order) {
+// locationContext (اختياري): لو الزبون بعت موقعه المباشر (بهاي الرسالة أو رسالة قبلها بنفس المحادثة)،
+// منرفق الرقم/المسافة/الإحداثيات المحسوبة فعلياً بالكود مع الطلب — دقيق دايماً بغض النظر شو كتب الذكاء الاصطناعي بالملخص.
+async function recordOrder(bot, from, channel, order, locationContext = null) {
   try {
     const ordersRaw = store.read(`bots/${bot.id}/orders.json`);
     const orders = Array.isArray(ordersRaw) ? ordersRaw : [];
@@ -170,6 +201,19 @@ async function recordOrder(bot, from, channel, order) {
       notes: order.notes || "",
       status: "new",
       channel,
+      ...(locationContext
+        ? {
+            deliveryLocation: {
+              lat: locationContext.lat,
+              lng: locationContext.lng,
+              address: locationContext.address || null,
+              branch: locationContext.branch?.name || null,
+              distanceKm: locationContext.distanceKm ?? null,
+              deliveryFee: locationContext.fee ?? null,
+              estimated: Boolean(locationContext.estimated),
+            },
+          }
+        : {}),
     };
 
     orders.push(record);
@@ -217,9 +261,10 @@ async function recordOrder(bot, from, channel, order) {
  * @param {(to:string, text:string) => Promise<void>} sendText - دالة الإرسال الخاصة بهاد البوت
  * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لإرسال صور الأصناف تلقائياً)
  * @param {string} [channel] - "whatsapp" | "messenger" | "instagram" — لتسجيله مع الطلب بس
+ * @param {{lat:number, lng:number}|null} [location] - موقع مباشر بعته الزبون (Live/Pin Location) بهاي الرسالة (اختياري)
  */
-async function handleIncomingMessage(botId, from, text, image, sendText, sendImage, channel = "whatsapp") {
-  trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} hasImage=${!!image}`);
+async function handleIncomingMessage(botId, from, text, image, sendText, sendImage, channel = "whatsapp", location = null) {
+  trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} hasImage=${!!image} hasLocation=${!!location}`);
   if (!from) return;
 
   const bot = botStore.getBot(botId);
@@ -280,11 +325,38 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
 
   const customerProfile = getCustomerProfile(botId, from);
   const discountContext = await getDiscountContext(botId, bot.configId, from, text);
-  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length}, زبون سابق=${customerProfile ? "نعم" : "لا"}, خصم=${discountContext ? "نعم" : "لا"})...`);
+
+  // لو الزبون بعت موقعه المباشر بهاي الرسالة، بنحسب أقرب فرع/مسافة الطريق الفعلية/رسم التوصيل ونحفظه —
+  // وإلا (زبون بعت الموقع برسالة سابقة وهلأ عم يأكد الطلب بس) بنستخدم آخر موقع محفوظ لنفس المحادثة.
+  let locationContext = null;
+  if (location && typeof location.lat === "number" && typeof location.lng === "number") {
+    try {
+      locationContext = await withTimeout(
+        deliveryCalc.computeLocationDelivery(bot.configId, location.lat, location.lng),
+        LOCATION_CALC_TIMEOUT_MS,
+        "computeLocationDelivery"
+      );
+      saveStoredLocation(botId, from, locationContext);
+      trace(
+        `handleIncomingMessage: حسبت توصيل الموقع المباشر لـ ${from} (فرع=${locationContext.branch?.name || "-"}, مسافة=${locationContext.distanceKm ?? "-"}كم, رسم=${locationContext.fee ?? "-"}).`
+      );
+    } catch (err) {
+      trace(`handleIncomingMessage: فشل حساب توصيل الموقع المباشر لـ ${from}: ${err.message}`);
+      console.error("[messageHandler] فشل حساب توصيل الموقع المباشر:", err.message);
+    }
+  } else {
+    locationContext = getStoredLocation(botId, from);
+  }
+
+  // لو الزبون بعت موقع بدون أي نص مرافق، منحط نص بديل واضح عشان المحادثة المحفوظة وطلب استرجاع الطلب
+  // الفائت (recoverMissedOrder) يفهموا إنو صار حدث فعلي هالرسالة (مش رسالة فاضية).
+  const effectiveUserMessage = text || (location ? "📍 [بعت موقعه المباشر]" : "");
+
+  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length}, زبون سابق=${customerProfile ? "نعم" : "لا"}, خصم=${discountContext ? "نعم" : "لا"}, موقع=${locationContext ? "نعم" : "لا"})...`);
   let reply, order;
   try {
     const result = await withTimeout(
-      generateReply(history, text, image, bot.configId, customerProfile, discountContext),
+      generateReply(history, effectiveUserMessage, image, bot.configId, customerProfile, discountContext, locationContext),
       AI_TIMEOUT_MS,
       "generateReply"
     );
@@ -310,7 +382,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   if (settings.sendImagesAutomatically && sendImage) {
     try {
       const menu = store.read(`configs/${bot.configId}/menu.json`);
-      const mentioned = findMentionedItemsWithImages(menu, text, reply).slice(0, MAX_AUTO_IMAGES_PER_REPLY);
+      const mentioned = findMentionedItemsWithImages(menu, effectiveUserMessage, reply).slice(0, MAX_AUTO_IMAGES_PER_REPLY);
       for (const item of mentioned) {
         trace(`handleIncomingMessage: بلشت إرسال صورة الصنف "${item.name}" لـ ${from}...`);
         await sendImage(from, item.imageUrl);
@@ -328,7 +400,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   if (!order && looksLikeMissedOrderConfirmation(reply)) {
     trace(`handleIncomingMessage: الرد لـ ${from} بيبدو إنه أكد طلب بدون استدعاء الأداة — رح أحاول أسترجعه...`);
     try {
-      order = await recoverMissedOrder(bot.configId, history, text, reply);
+      order = await recoverMissedOrder(bot.configId, history, effectiveUserMessage, reply);
       trace(`handleIncomingMessage: محاولة استرجاع الطلب الفائت لـ ${from} ${order ? "نجحت ✅" : "رجعت بدون طلب"}.`);
     } catch (err) {
       trace(`handleIncomingMessage: فشلت محاولة استرجاع الطلب الفائت لـ ${from}: ${err.message}`);
@@ -338,10 +410,10 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
 
   if (order) {
     trace(`handleIncomingMessage: طلب مؤكد من ${from} — بلشت recordOrder...`);
-    await recordOrder(bot, from, channel, order);
+    await recordOrder(bot, from, channel, order, locationContext);
   }
 
-  history.push({ role: "user", content: text || "[صورة]" });
+  history.push({ role: "user", content: effectiveUserMessage || "[صورة]" });
   history.push({ role: "assistant", content: reply });
   conversations[from] = history.slice(-20);
   store.write(`bots/${botId}/conversations.json`, conversations);
@@ -395,7 +467,7 @@ async function flushBuffer(key) {
 
   try {
     trace(`flushBuffer: بلشت handleIncomingMessage لـ ${key}`);
-    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText, buffer.sendImage, buffer.channel);
+    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText, buffer.sendImage, buffer.channel, buffer.location);
     trace(`flushBuffer: خلص handleIncomingMessage لـ ${key} بنجاح.`);
   } catch (err) {
     trace(`flushBuffer: خطأ بمعالجة الرسائل المجمّعة لـ ${key}: ${err.message}\n${err.stack}`);
@@ -412,14 +484,15 @@ async function flushBuffer(key) {
  *   يستخدم لإظهار مؤشر "يكتب الآن..." (مدعوم حالياً بماسنجر/انستجرام).
  * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لصور الأصناف التلقائية)
  * @param {string} [channel] - "whatsapp" | "messenger" | "instagram" — لتسجيله مع أي طلب ينسجل بهاي المحادثة
+ * @param {{lat:number, lng:number}|null} [location] - موقع مباشر (Live/Pin Location) بعته الزبون بهاي الرسالة (اختياري)
  */
-function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart, sendImage, channel = "whatsapp") {
+function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart, sendImage, channel = "whatsapp", location = null) {
   if (!from) {
     trace(`queueIncomingMessage: تجاهلت — ما في from (botId=${botId}).`);
     return;
   }
-  if (!text && !image) {
-    trace(`queueIncomingMessage: تجاهلت — ما في نص ولا صورة (botId=${botId} from=${from}).`);
+  if (!text && !image && !location) {
+    trace(`queueIncomingMessage: تجاهلت — ما في نص ولا صورة ولا موقع (botId=${botId} from=${from}).`);
     return;
   }
 
@@ -430,6 +503,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
   if (existing) {
     if (text) existing.parts.push(text);
     if (image) existing.image = image;
+    if (location) existing.location = location;
     existing.sendText = sendText;
     if (onTypingStart) existing.onTypingStart = onTypingStart;
     if (sendImage) existing.sendImage = sendImage;
@@ -443,6 +517,7 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
   const buffer = {
     parts: text ? [text] : [],
     image: image || null,
+    location: location || null,
     sendText,
     onTypingStart,
     sendImage,

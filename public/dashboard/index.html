@@ -974,7 +974,51 @@ function MenuPanel({ bot, api }) {
   );
 }
 
-function DeliveryPanel({ bot, api }) {
+function DeliveryFormulaPanel({ bot, api }) {
+  const [delivery, setDelivery] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api(`/api/bots/${bot.id}/settings`).then((s) => setDelivery({ base: 1.5, freeKm: 2, perKm: 0.27, ...(s.delivery || {}) }));
+  }, [bot.id]);
+  if (!delivery) return null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const current = await api(`/api/bots/${bot.id}/settings`);
+      await api(`/api/bots/${bot.id}/settings`, { method: "PUT", body: { ...current, delivery } });
+      alert("تم الحفظ ✅");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // معاينة حية: نحسب مثال بمسافة تجريبية عشان صاحب البوت يشوف أثر تغيير الأرقام قبل ما يحفظ
+  const previewKm = 5;
+  const preview =
+    previewKm <= delivery.freeKm ? delivery.base : Math.ceil(delivery.base + (previewKm - delivery.freeKm) * delivery.perKm);
+
+  return (
+    <div className="panel">
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>تسعيرة التوصيل حسب المسافة (لما الزبون يبعت موقعه المباشر 📍)</div>
+      <div className="small" style={{ color: "var(--ink-dim)", marginBottom: 14 }}>
+        رسم أساسي يغطي أول كذا كيلومتر، وبعدها سعر لكل كيلومتر إضافي (ونقرّب لفوق لأقرب دينار). البوت بيحسب هاد الرسم تلقائياً بالاعتماد على أقرب فرع ومسافة الطريق الفعلية — نفس الطريقة المستخدمة بموقع المنيو.
+      </div>
+      <div className="grid3 mb14">
+        <div><label className="small">رسم أساسي (د.أ)</label><input type="number" step="0.05" value={delivery.base} onChange={(e) => setDelivery({ ...delivery, base: Number(e.target.value) })} /></div>
+        <div><label className="small">كم مجاني ضمن الرسم الأساسي</label><input type="number" step="0.1" value={delivery.freeKm} onChange={(e) => setDelivery({ ...delivery, freeKm: Number(e.target.value) })} /></div>
+        <div><label className="small">سعر كل كم إضافي (د.أ)</label><input type="number" step="0.01" value={delivery.perKm} onChange={(e) => setDelivery({ ...delivery, perKm: Number(e.target.value) })} /></div>
+      </div>
+      <div className="panel-2" style={{ marginBottom: 14, fontSize: 13, color: "var(--ink-dim)" }}>
+        مثال: زبون على بعد {previewKm} كم من أقرب فرع → الرسم = <b style={{ color: "var(--amber)" }}>{preview} د.أ</b>
+      </div>
+      <button className="btn" onClick={save} disabled={saving}>{saving ? "..." : "حفظ التسعيرة"}</button>
+    </div>
+  );
+}
+
+function DeliveryAreasPanel({ bot, api }) {
   const [fees, setFees] = useState([]);
   const [area, setArea] = useState(""); const [fee, setFee] = useState(""); const [q, setQ] = useState("");
   const load = () => api(`/api/bots/${bot.id}/delivery-fees`).then(setFees);
@@ -986,6 +1030,10 @@ function DeliveryPanel({ bot, api }) {
 
   return (
     <div className="panel">
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>مناطق برسوم ثابتة (لما الزبون يكتب منطقته نصاً)</div>
+      <div className="small" style={{ color: "var(--ink-dim)", marginBottom: 14 }}>
+        هاي قائمة احتياطية لمناطق برسم ثابت متفق عليه — تستخدم لو الزبون كتب اسم منطقته بدل ما يبعت موقعه المباشر.
+      </div>
       <div className="flex gap8 mb14">
         <input placeholder="بحث عن منطقة..." value={q} onChange={(e) => setQ(e.target.value)} />
         <input placeholder="منطقة جديدة" value={area} onChange={(e) => setArea(e.target.value)} />
@@ -993,7 +1041,7 @@ function DeliveryPanel({ bot, api }) {
         <button className="btn" onClick={addRow}>إضافة</button>
         {fees.length > 0 && <button className="btn-danger" onClick={clearAll}>🗑 امسح الكل</button>}
       </div>
-      <div style={{ maxHeight: 440, overflowY: "auto" }} className="flexcol gap8">
+      <div style={{ maxHeight: 380, overflowY: "auto" }} className="flexcol gap8">
         {filtered.map((f, idx) => {
           const realIdx = fees.indexOf(f);
           return (
@@ -1007,6 +1055,105 @@ function DeliveryPanel({ bot, api }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function DeliveryPanel({ bot, api }) {
+  return (
+    <div className="flexcol gap14">
+      <DeliveryFormulaPanel bot={bot} api={api} />
+      <DeliveryAreasPanel bot={bot} api={api} />
+    </div>
+  );
+}
+
+const emptyBranch = () => ({ id: `branch-${Date.now()}`, name: "", lat: "", lng: "", address: "", mapLink: "", open24h: false, openTime: "15:00", closeTime: "23:59" });
+
+function BranchesPanel({ bot, api }) {
+  const [branches, setBranches] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+
+  const load = () => api(`/api/bots/${bot.id}/branches`).then((d) => { setBranches(d); if (d.length && !selectedId) setSelectedId(d[0].id); });
+  useEffect(() => { load(); }, [bot.id]);
+
+  const save = async (updated) => { setBranches(updated); await api(`/api/bots/${bot.id}/branches`, { method: "PUT", body: updated }); };
+  const addBranch = () => { const b = emptyBranch(); setBranches([...branches, b]); setSelectedId(b.id); };
+  const update = (field, value) => setBranches(branches.map((b) => (b.id === selectedId ? { ...b, [field]: value } : b)));
+  const selected = branches.find((b) => b.id === selectedId);
+
+  const saveAll = async () => {
+    const cleaned = branches.map((b) => ({ ...b, lat: Number(b.lat), lng: Number(b.lng) }));
+    if (cleaned.some((b) => !b.name.trim() || Number.isNaN(b.lat) || Number.isNaN(b.lng))) {
+      return alert("كل فرع لازم يكون له اسم وإحداثيات (خط عرض وطول) صحيحة.");
+    }
+    try {
+      await save(cleaned);
+      alert("تم الحفظ ✅");
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const removeBranch = () => {
+    if (!selected) return;
+    if (!confirm(`متأكد بدك تحذف فرع "${selected.name || "بدون اسم"}"؟`)) return;
+    const updated = branches.filter((b) => b.id !== selectedId);
+    setBranches(updated);
+    setSelectedId(updated[0]?.id || null);
+  };
+
+  return (
+    <div className="grid2" style={{ gridTemplateColumns: "2fr 3fr", alignItems: "start" }}>
+      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="flex" style={{ justifyContent: "space-between", padding: 14, borderBottom: "1px solid var(--line)" }}>
+          <span style={{ fontWeight: 700 }}>الفروع ({branches.length})</span>
+          <button className="btn-ghost" style={{ fontSize: 12 }} onClick={addBranch}>+ فرع جديد</button>
+        </div>
+        <div style={{ padding: 10 }}>
+          {branches.length === 0 && <p style={{ color: "var(--ink-dim)", fontSize: 13, padding: 6 }}>ولا فرع مسجل بعد — ضيف فرع عشان البوت يقدر يحسب أقرب فرع ورسم توصيل تلقائي لما الزبون يبعت موقعه.</p>}
+          {branches.map((b) => (
+            <div key={b.id} className="panel-2" style={{ marginBottom: 6, cursor: "pointer", borderColor: selectedId === b.id ? "var(--amber)" : "var(--line)" }} onClick={() => setSelectedId(b.id)}>
+              <span style={{ fontSize: 13 }}>{b.name || "فرع بدون اسم"}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {selected && (
+        <div className="panel">
+          <div className="grid2 mb14">
+            <div><label className="small">اسم الفرع</label><input value={selected.name} onChange={(e) => update("name", e.target.value)} placeholder="مثال: شارع الجامعة" /></div>
+            <div><label className="small">العنوان</label><input value={selected.address} onChange={(e) => update("address", e.target.value)} placeholder="عنوان الفرع بالتفصيل" /></div>
+          </div>
+          <div className="grid2 mb14">
+            <div><label className="small">خط العرض (lat)</label><input dir="ltr" value={selected.lat} onChange={(e) => update("lat", e.target.value)} placeholder="مثال: 31.9539" /></div>
+            <div><label className="small">خط الطول (lng)</label><input dir="ltr" value={selected.lng} onChange={(e) => update("lng", e.target.value)} placeholder="مثال: 35.9106" /></div>
+          </div>
+          <div className="small" style={{ color: "var(--ink-dim)", marginBottom: 14 }}>
+            احصل على الإحداثيات من خرائط جوجل: افتح موقع الفرع بالخريطة، دوس زر يمين على المكان بالضبط، وانسخ الرقمين يلي بيطلعوا (خط العرض، خط الطول).
+          </div>
+          <div className="mb14"><label className="small">رابط خرائط جوجل (اختياري)</label><input dir="ltr" value={selected.mapLink} onChange={(e) => update("mapLink", e.target.value)} placeholder="https://maps.app.goo.gl/..." /></div>
+
+          <div className="mb14">
+            <div className="flex" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <label className="small" style={{ margin: 0 }}>مفتوح 24 ساعة</label>
+              <Switch on={!!selected.open24h} onClick={() => update("open24h", !selected.open24h)} />
+            </div>
+            {!selected.open24h && (
+              <div className="flex gap8">
+                <div style={{ flex: 1 }}><label className="small">فتح</label><input type="time" value={selected.openTime} onChange={(e) => update("openTime", e.target.value)} /></div>
+                <div style={{ flex: 1 }}><label className="small">إغلاق</label><input type="time" value={selected.closeTime} onChange={(e) => update("closeTime", e.target.value)} /></div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap8">
+            <button className="btn" onClick={saveAll}>حفظ كل الفروع</button>
+            <button className="btn-danger" onClick={removeBranch}>حذف هاد الفرع</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1025,6 +1172,14 @@ function OrderTicket({ o, idx, onComplete }) {
       <div style={{ fontWeight: 700 }}>{o.name || "زبون"}</div>
       <div style={{ fontSize: 12, opacity: .7 }}>{o.phone}{o.channel ? ` — ${CHANNEL_LABEL[o.channel] || o.channel}` : ""}</div>
       {o.area && <div style={{ fontSize: 12, marginTop: 4 }}>📍 {o.area}</div>}
+      {o.deliveryLocation && (
+        <div style={{ fontSize: 11, marginTop: 4, color: "#5a4a20" }}>
+          📌 موقع مباشر{o.deliveryLocation.branch ? ` — أقرب فرع: ${o.deliveryLocation.branch}` : ""}
+          {typeof o.deliveryLocation.distanceKm === "number" ? ` (${o.deliveryLocation.distanceKm} كم)` : ""}
+          {typeof o.deliveryLocation.deliveryFee === "number" ? ` — رسم التوصيل: ${o.deliveryLocation.deliveryFee} د.أ` : ""}
+          {o.deliveryLocation.estimated ? " (تقريبي)" : ""}
+        </div>
+      )}
       <div className="ticket-divider" style={{ fontFamily: "monospace", fontSize: 13 }}>
         {(o.items || []).map((it, i) => <div key={i}>{it}</div>)}
       </div>
@@ -1415,7 +1570,7 @@ function Dashboard({ employee, onLogout }) {
 
   const tabs = [
     ["connections", "الربط والمنصات"], ["style", "الأسلوب والسلوك"], ["security", "الأمان والحواجز"],
-    ["human", "التحكم اليدوي"], ["menu", "المنيو والصور"], ["delivery", "التوصيل والأسعار"],
+    ["human", "التحكم اليدوي"], ["menu", "المنيو والصور"], ["branches", "الفروع"], ["delivery", "التوصيل والأسعار"],
     ["orders", "الطلبات"], ["conversations", "المحادثات"], ["employees", "الموظفين والصلاحيات"],
   ];
 
@@ -1463,6 +1618,7 @@ function Dashboard({ employee, onLogout }) {
         {selectedBot && tab === "security" && <SecurityPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "human" && <HumanTakeoverPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "menu" && <MenuPanel bot={selectedBot} api={api} />}
+        {selectedBot && tab === "branches" && <BranchesPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "delivery" && <DeliveryPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "orders" && <OrdersPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "conversations" && <ConversationsPanel bot={selectedBot} api={api} />}

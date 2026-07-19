@@ -1,5 +1,5 @@
 const env = require("../config/env");
-const { buildSystemPrompt, buildCustomerProfileSection, buildDiscountSection } = require("./promptBuilder");
+const { buildSystemPrompt, buildCustomerProfileSection, buildDiscountSection, buildLocationSection } = require("./promptBuilder");
 
 // أداة تسجيل الطلب — الموديل يستدعيها لما الزبون يأكد كل تفاصيل طلبه صراحة (اسمها بالبرومبت أيضاً، شوف promptBuilder.js).
 // لما تنستدعى، منسجل الطلب بلوحة التحكم ومنبعته لجروب الواتساب (لو مفعّل) بشكل منفصل تماماً عن أي شي الموديل شافه أو قاله للزبون.
@@ -37,14 +37,16 @@ const ORDER_TOOL = {
  * @param {string} configId - أي بوت/قالب إعدادات نستخدم
  * @param {{name?:string, phone?:string, area?:string, lastItems?:string[], lastOrderAt?:string} | null} customerProfile - بيانات الزبون من طلب سابق (لو موجودة)
  * @param {{vip?: {percent:number,name:string|null}, code?: {code:string,kind:string,value:number}} | null} discountContext - خصم VIP أو كود خصم متأكد منه لهالرسالة (لو في)
+ * @param {{address?:string|null, branch?:object|null, distanceKm?:number|null, fee?:number|null, estimated?:boolean} | null} locationContext - موقع مباشر بعته الزبون بهالرسالة، محسوب سلفاً (deliveryCalc.js)
  * @returns {Promise<{reply: string, order: object|null}>} رد البوت النصي + تفاصيل الطلب لو تأكد هالرسالة
  */
-async function generateReply(history, userMessage, image = null, configId = "default", customerProfile = null, discountContext = null) {
+async function generateReply(history, userMessage, image = null, configId = "default", customerProfile = null, discountContext = null, locationContext = null) {
   const systemPrompt = buildSystemPrompt(configId);
-  // بيانات الزبون + الخصم منفصلين عن البرومبت الثابت أعلاه — عمداً بدون cache_control، عشان ما نكسر كاش
+  // بيانات الزبون + الخصم + الموقع منفصلين عن البرومبت الثابت أعلاه — عمداً بدون cache_control، عشان ما نكسر كاش
   // البرومبت الكبير (منيو/إعدادات) يلي مشترك بين كل الزبائن. هاي بلوكات صغيرة خاصة بهاد الزبون/الرسالة بس.
   const customerSection = buildCustomerProfileSection(customerProfile);
   const discountSection = buildDiscountSection(discountContext);
+  const locationSection = buildLocationSection(locationContext);
 
   const userContent = image
     ? [
@@ -74,6 +76,7 @@ async function generateReply(history, userMessage, image = null, configId = "def
         { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
         ...(customerSection ? [{ type: "text", text: customerSection }] : []),
         ...(discountSection ? [{ type: "text", text: discountSection }] : []),
+        ...(locationSection ? [{ type: "text", text: locationSection }] : []),
       ],
       messages,
       tools: [ORDER_TOOL],

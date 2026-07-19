@@ -399,6 +399,33 @@ router.put("/:id/delivery-fees", requireRole("owner"), (req, res) => {
   res.json({ message: "تم التحديث." });
 });
 
+// ---------- فروع البوت (موقع + ساعات دوام كل فرع) — قائمة مفتوحة بدون سقف (فرع واحد أو أكتر بنفس الشكل) ----------
+// تستخدم لتحديد أقرب فرع وحساب مسافة/رسم التوصيل تلقائياً لما الزبون يبعت موقعه المباشر (شوف deliveryCalc.js).
+router.get("/:id/branches", (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+  res.json(store.exists(`configs/${bot.configId}/branches.json`) ? store.read(`configs/${bot.configId}/branches.json`) : []);
+});
+
+// body: مصفوفة فروع كاملة [{id, name, lat, lng, address, mapLink, open24h, openTime, closeTime}, ...]
+router.put("/:id/branches", requireRole("owner"), (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+
+  const branches = Array.isArray(req.body) ? req.body : null;
+  if (!branches) return res.status(400).json({ error: "لازم تبعت مصفوفة فروع." });
+
+  for (const b of branches) {
+    if (!b.name?.trim()) return res.status(400).json({ error: "كل فرع لازم يكون له اسم." });
+    if (typeof b.lat !== "number" || typeof b.lng !== "number" || Number.isNaN(b.lat) || Number.isNaN(b.lng)) {
+      return res.status(400).json({ error: `فرع "${b.name}" لازم يكون له إحداثيات (خط عرض/طول) صحيحة.` });
+    }
+  }
+
+  store.write(`configs/${bot.configId}/branches.json`, branches);
+  res.json({ message: "تم تحديث الفروع." });
+});
+
 // ---------- طلبات البوت ----------
 router.get("/:id/orders", requireRole("owner", "orders", "viewer"), (req, res) => {
   res.json(store.read(`bots/${req.params.id}/orders.json`));

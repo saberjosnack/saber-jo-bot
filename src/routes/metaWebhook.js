@@ -77,6 +77,13 @@ router.post("/", async (req, res) => {
 
           const imageAttachment = attachments.find((a) => a.type === "image");
           const audioAttachment = attachments.find((a) => a.type === "audio");
+          // موقع مباشر عن طريق ماسنجر — https://developers.facebook.com/docs/messenger-platform/webhooks#location
+          // الصيغة: attachment.type === "location"، payload.coordinates = {lat, long} (مش "lng").
+          const locationAttachment = attachments.find((a) => a.type === "location");
+          const location = locationAttachment?.payload?.coordinates
+            ? { lat: locationAttachment.payload.coordinates.lat, lng: locationAttachment.payload.coordinates.long }
+            : null;
+          if (location) trace(`لقيت موقع مباشر بـ${channel} من ${from}: ${location.lat},${location.lng}`);
 
           if (imageAttachment?.payload?.url) {
             try {
@@ -106,8 +113,8 @@ router.post("/", async (req, res) => {
             }
           }
 
-          if (!text && !image) {
-            trace("تجاهلت الحدث: ما في نص ولا صورة ولا صوت مدعوم.");
+          if (!text && !image && !location) {
+            trace("تجاهلت الحدث: ما في نص ولا صورة ولا صوت ولا موقع مدعوم.");
             continue;
           }
 
@@ -117,7 +124,7 @@ router.post("/", async (req, res) => {
             channel === "messenger" ? meta.sendMessengerImage(bot, to, imageUrl) : meta.sendInstagramImage(bot, to, imageUrl);
 
           trace(`أضفت الرسالة لطابور التجميع لبوت=${bot.id} from=${from}`);
-          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart, sendImageFn, channel);
+          queueIncomingMessage(bot.id, from, text, image, sendFn, onTypingStart, sendImageFn, channel, location);
         } catch (err) {
           trace(`خطأ بمعالجة الحدث: ${err.message}\n${err.stack}`);
           console.error(`خطأ بمعالجة رسالة ${channel} واردة:`, err);

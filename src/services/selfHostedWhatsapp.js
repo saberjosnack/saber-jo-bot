@@ -172,6 +172,12 @@ async function startBotConnection(botId) {
         msg.message.imageMessage?.caption ||
         "";
       let image = null;
+      // موقع مباشر (Live Location) أو موقع مثبّت لمرة وحدة (Pin Location) — نفس أسماء الحقول بالاثنين بمكتبة Baileys
+      const locMsg = msg.message.locationMessage || msg.message.liveLocationMessage;
+      const location =
+        locMsg && typeof locMsg.degreesLatitude === "number"
+          ? { lat: locMsg.degreesLatitude, lng: locMsg.degreesLongitude }
+          : null;
 
       try {
         if (msg.message.imageMessage) {
@@ -188,7 +194,7 @@ async function startBotConnection(botId) {
           }
         }
 
-        if (!text && !image) continue;
+        if (!text && !image && !location) continue;
 
         queueIncomingMessage(
           botId,
@@ -198,7 +204,8 @@ async function startBotConnection(botId) {
           (to, t) => sendText(botId, to, t),
           undefined,
           (to, imageUrl) => sendImage(botId, to, imageUrl),
-          "whatsapp"
+          "whatsapp",
+          location
         );
       } catch (err) {
         console.error(`خطأ بمعالجة رسالة للبوت ${botId}:`, err);

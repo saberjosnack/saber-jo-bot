@@ -18,6 +18,11 @@
     "voiceName": "رنا"
   },
   "sendImagesAutomatically": true,
+  "delivery": {
+    "base": 1.5,
+    "freeKm": 2,
+    "perKm": 0.27
+  },
   "guardrails": {
     "no-prices": true,
     "no-competitors": true,

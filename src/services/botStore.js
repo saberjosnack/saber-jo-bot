@@ -46,6 +46,7 @@ function createBot(name, shareConfigFromBotId = null) {
     store.write(`configs/${configId}/settings.json`, defaultSettingsTemplate(name));
     store.write(`configs/${configId}/menu.json`, []);
     store.write(`configs/${configId}/deliveryFees.json`, []);
+    store.write(`configs/${configId}/branches.json`, []);
   }
 
   store.write(`bots/${id}/conversations.json`, {});
@@ -107,6 +108,11 @@ function defaultSettingsTemplate(employeeName) {
     style: { tones: ["ودود"], emojiLevel: "low", responseLength: 400 },
     voice: { enabled: false, dialect: "الأردن", gender: "أنثى", voiceName: "رنا" },
     sendImagesAutomatically: true,
+    // تسعيرة التوصيل حسب المسافة الفعلية (لما الزبون يبعت موقعه المباشر) — كل القيم متغيّرة من الداشبورد:
+    //  base   = رسوم فتح الطلب (تغطي المسافة المجانية)
+    //  freeKm = عدد الكيلومترات المشمولة بالرسوم الأساسية
+    //  perKm  = سعر كل كيلومتر إضافي بعد المسافة المجانية (ونقرّب لفوق لأقرب دينار)
+    delivery: { base: 1.5, freeKm: 2, perKm: 0.27 },
     // إعدادات سرعة الرد — قابلة للتحكم من الداشبورد (كل القيم بالثواني)
     timing: {
       debounceSec: 6, // كم ثانية ننتظر بعد آخر رسالة قبل ما نجمّع ونرد
