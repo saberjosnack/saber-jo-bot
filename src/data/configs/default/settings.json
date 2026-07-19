@@ -1,6 +1,8 @@
 {
   "identity": {
     "employeeName": "سابر",
+    "businessName": "Saber Jo Snack",
+    "brandAliases": "SJS",
     "openTime": "15:00",
     "closeTime": "04:30",
     "salesPower": "mid",

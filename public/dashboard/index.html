@@ -549,7 +549,7 @@ function StylePanel({ bot, api, refreshBots }) {
       // نضيف قيم افتراضية لأي بوت قديم ما عندوش هاي الحقول محفوظة أصلاً
       setS({
         ...data,
-        identity: { open24h: false, businessName: "", businessAddress: "", businessType: "", supportPhone: "", ...data.identity },
+        identity: { open24h: false, businessName: "", brandAliases: "", businessAddress: "", businessType: "", supportPhone: "", ...data.identity },
         timing: { debounceSec: 6, minDelaySec: 1.2, maxDelaySec: 6, ...(data.timing || {}) },
         orderDestination: { mode: "dashboard", target: "", targetName: "", ...(data.orderDestination || {}) },
       });
@@ -597,6 +597,13 @@ function StylePanel({ bot, api, refreshBots }) {
         <div className="grid2 mb14">
           <div><label className="small">اسم الموظف (البوت)</label><input value={s.identity.employeeName} onChange={(e) => setS({ ...s, identity: { ...s.identity, employeeName: e.target.value } })} /></div>
           <div><label className="small">اسم الشركة/المحل</label><input placeholder="مثال: تريندي" value={s.identity.businessName} onChange={(e) => setS({ ...s, identity: { ...s.identity, businessName: e.target.value } })} /></div>
+        </div>
+        <div className="grid2 mb14">
+          <div>
+            <label className="small">اسم/شعار مختصر (لو مختلف عن الاسم الكامل)</label>
+            <input placeholder="مثال: SJS" value={s.identity.brandAliases || ""} onChange={(e) => setS({ ...s, identity: { ...s.identity, brandAliases: e.target.value } })} />
+            <div className="small" style={{ color: "var(--ink-dim)", marginTop: 4 }}>لو موادكم التسويقية (صور، عروض) عليها اسم مختصر أو شعار غير الاسم الكامل فوق، حطه هون — عشان البوت ما يظن إنو صورة رسمية منكم هي لمطعم تاني.</div>
+          </div>
         </div>
         <div className="grid2 mb14">
           <div><label className="small">العنوان</label><input placeholder="مثال: عمّان، جبل الحسين" value={s.identity.businessAddress} onChange={(e) => setS({ ...s, identity: { ...s.identity, businessAddress: e.target.value } })} /></div>
