@@ -539,6 +539,7 @@ function StylePanel({ bot, api, refreshBots }) {
   const [groups, setGroups] = useState(null);
   const [groupsErr, setGroupsErr] = useState("");
   const [loadingGroups, setLoadingGroups] = useState(false);
+  const [syncingPos, setSyncingPos] = useState(false);
 
   useEffect(() => {
     api(`/api/bots/${bot.id}/settings`).then((data) => {
@@ -556,7 +557,6 @@ function StylePanel({ bot, api, refreshBots }) {
   const save = async () => { await api(`/api/bots/${bot.id}/settings`, { method: "PUT", body: s }); alert("تم الحفظ ✅"); };
   const toggleTone = (t) => setS({ ...s, style: { ...s.style, tones: s.style.tones.includes(t) ? s.style.tones.filter(x => x !== t) : [...s.style.tones, t] } });
 
-  const [syncingPos, setSyncingPos] = useState(false);
   const togglePosSync = async () => {
     await api(`/api/bots/${bot.id}/pos-sync`, { method: "PUT", body: { enabled: !bot.posSync?.enabled } });
     refreshBots();
