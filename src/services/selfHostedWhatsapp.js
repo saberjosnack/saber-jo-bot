@@ -79,6 +79,10 @@ async function startBotConnection(botId) {
     printQRInTerminal: false,
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    // القيمة الافتراضية 60 ثانية بالضبط — وهاد نفس التوقيت يلي عم يطلع فيه خطأ "init queries" الداخلي
+    // بمكتبة Baileys كل مرة نتصل (شوف اللوجز: بيصير بعد ~60 ثانية من كل اتصال). رفعناها هون كمحاولة
+    // تخفيف لو السبب إنو شبكة Render لسيرفرات واتساب بطيئة أحياناً وما بتلحق ترد قبل المهلة القديمة.
+    defaultQueryTimeoutMs: 120000,
   });
 
   connections.set(botId, { sock, qr: null, status: "connecting" });
