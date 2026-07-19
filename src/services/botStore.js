@@ -100,6 +100,8 @@ function defaultSettingsTemplate(employeeName) {
       businessName: "",
       businessAddress: "",
       businessType: "توصيل واستلام بس، بدون تناول بالمكان",
+      // رقم الدعم/السنتر — بيظهر للزبون بحالات محددة بس (مثلاً المحل مسكر وعنده استفسار عاجل، شوف promptBuilder.js)
+      supportPhone: "",
       open24h: false,
       openTime: "15:00",
       closeTime: "23:59",

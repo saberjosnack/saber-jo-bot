@@ -4,7 +4,8 @@
     "openTime": "15:00",
     "closeTime": "04:30",
     "salesPower": "mid",
-    "dialect": "الأردن"
+    "dialect": "الأردن",
+    "supportPhone": "0796893403"
   },
   "style": {
     "tones": ["ودود", "مقنع"],

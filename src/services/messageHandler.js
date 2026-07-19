@@ -139,25 +139,31 @@ function normalizeSpaces(s) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
 
-// بيدوّر على أصناف "متوفرة" وعندها صورة محفوظة، واسمها مذكور برسالة الزبون أو برد البوت.
-// مطابقة بسيطة بالنص (مش ذكاء اصطناعي). ملاحظة: قبل هيك كنا نطلب تطابق اسم الصنف الكامل بالضبط
-// (مثلاً "رويال سليم  للتنحيف علبه 1" بمسافتين) — بس بالواقع البوت غالباً بيذكر بس الاسم التجاري
-// المختصر ("رويال سليم") برده الطبيعي، فما كان يطابق أبداً وتضل الصورة ما ترسل حتى لو الزبون طلبها صراحة.
-// هلأ منجرب كمان مطابقة أول كلمتين من اسم الصنف (الاسم التجاري المختصر) كاحتياط.
-function findMentionedItemsWithImages(menu, userText, replyText) {
-  const haystack = normalizeSpaces(`${userText || ""} ${replyText || ""}`);
-  if (!haystack) return [];
-  return menu.filter((item) => {
-    if (!item.available || !item.imageUrl || !item.name) return false;
-    const fullName = normalizeSpaces(item.name);
-    if (haystack.includes(fullName)) return true;
-    const words = fullName.split(" ").filter(Boolean);
-    if (words.length >= 2) {
-      const shortKey = words.slice(0, 2).join(" ");
-      if (shortKey.length >= 4 && haystack.includes(shortKey)) return true;
-    }
-    return false;
-  });
+// بيحول أسماء أصناف قرر الموديل بوعي إنه يرسل صورهم (عن طريق أداة send_photo، شوف ai.js) لأصناف فعلية
+// من المنيو — "متوفرة" وعندها صورة محفوظة بس. مطابقة بسيطة بالاسم (مش ذكاء اصطناعي) لأنو اسم الصنف يلي
+// رجع من الأداة ممكن يكون الاسم التجاري المختصر ("رويال سليم") مش الاسم الكامل المسجل بالمنيو بالضبط.
+// ملاحظة: هاد بديل عن الطريقة القديمة (فحص كل نص الرد بحثاً عن أي اسم صنف مذكور) يلي كانت ترسل صور
+// لمجرد ذكر اسم الصنف بسياق عادي — هلأ الإرسال قرار واعي من الموديل نفسه (طلب صريح أو إغراء زبون متردد).
+function resolveRequestedPhotos(menu, requestedNames) {
+  if (!Array.isArray(requestedNames) || !requestedNames.length) return [];
+  const results = [];
+  for (const rawName of requestedNames) {
+    const needle = normalizeSpaces(rawName);
+    if (!needle) continue;
+    const match = menu.find((item) => {
+      if (!item.available || !item.imageUrl || !item.name || results.includes(item)) return false;
+      const fullName = normalizeSpaces(item.name);
+      if (fullName === needle || fullName.includes(needle) || needle.includes(fullName)) return true;
+      const words = fullName.split(" ").filter(Boolean);
+      if (words.length >= 2) {
+        const shortKey = words.slice(0, 2).join(" ");
+        if (shortKey.length >= 4 && (needle.includes(shortKey) || shortKey.includes(needle))) return true;
+      }
+      return false;
+    });
+    if (match) results.push(match);
+  }
+  return results;
 }
 
 // بيرجع آخر موقع مباشر بعته الزبون (لو بعت واحد قبل هيك بنفس المحادثة) — عشان لو بعت موقعه برسالة
@@ -279,7 +285,12 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
       phone: order.contactPhone || from,
       items,
       total: typeof order.totalPrice === "number" ? order.totalPrice : null,
+      subtotal: typeof order.subtotal === "number" ? order.subtotal : null,
+      deliveryFee: typeof order.deliveryFee === "number" ? order.deliveryFee : null,
+      fulfillment: order.fulfillment || "",
       area: order.area || "",
+      branch: order.branch || "",
+      contactMethod: order.contactMethod || "",
       notes: order.notes || "",
       status: "new",
       channel,
@@ -311,10 +322,15 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
       const summaryLines = [
         "🧾 طلب جديد",
         `الأصناف: ${items.length ? items.join("، ") : order.itemsSummary || "-"}`,
-        `المنطقة: ${record.area || "-"}`,
+        record.fulfillment === "pickup"
+          ? `الاستلام: من الفرع${record.branch ? ` (${record.branch})` : ""}`
+          : `المنطقة: ${record.area || "-"}`,
+        record.subtotal !== null ? `مجموع الأصناف: ${record.subtotal} د.أ` : null,
+        record.deliveryFee !== null && record.fulfillment !== "pickup" ? `رسم التوصيل: ${record.deliveryFee} د.أ` : null,
         record.total !== null ? `المجموع: ${record.total} د.أ` : null,
         record.name !== "زبون" ? `الاسم: ${record.name}` : null,
         `رقم التواصل: ${record.phone}`,
+        record.contactMethod ? `طريقة التواصل: ${record.contactMethod}` : null,
         record.notes ? `ملاحظات: ${record.notes}` : null,
       ].filter(Boolean);
 
@@ -421,7 +437,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   const effectiveUserMessage = text || (location ? "📍 [بعت موقعه المباشر]" : "");
 
   trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length}, زبون سابق=${customerProfile ? "نعم" : "لا"}, خصم=${discountContext ? "نعم" : "لا"}, موقع=${locationContext ? "نعم" : "لا"})...`);
-  let reply, order;
+  let reply, order, requestedPhotos = [];
   try {
     const result = await withTimeout(
       generateReply(history, effectiveUserMessage, image, bot.configId, customerProfile, discountContext, locationContext),
@@ -430,7 +446,8 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
     );
     reply = result.reply;
     order = result.order;
-    trace(`handleIncomingMessage: رجع رد من generateReply لـ ${from} (replyLen=${reply?.length || 0}، order=${order ? "نعم" : "لا"}).`);
+    requestedPhotos = result.requestedPhotos || [];
+    trace(`handleIncomingMessage: رجع رد من generateReply لـ ${from} (replyLen=${reply?.length || 0}، order=${order ? "نعم" : "لا"}، صور مطلوبة=${requestedPhotos.length}).`);
   } catch (err) {
     trace(`handleIncomingMessage: فشل generateReply لـ ${from}: ${err.message}\n${err.stack}`);
     reply = "معليش، صار عندي خلل بسيط 🙏 جرب ابعت رسالتك كمان مرة بعد شوي.";
@@ -450,7 +467,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   if (settings.sendImagesAutomatically && sendImage) {
     try {
       const menu = store.read(`configs/${bot.configId}/menu.json`);
-      const mentioned = findMentionedItemsWithImages(menu, effectiveUserMessage, reply).slice(0, MAX_AUTO_IMAGES_PER_REPLY);
+      const mentioned = resolveRequestedPhotos(menu, requestedPhotos).slice(0, MAX_AUTO_IMAGES_PER_REPLY);
       for (const item of mentioned) {
         trace(`handleIncomingMessage: بلشت إرسال صورة الصنف "${item.name}" لـ ${from}...`);
         await sendImage(from, item.imageUrl);

@@ -6,7 +6,7 @@ const { buildSystemPrompt, buildCustomerProfileSection, buildDiscountSection, bu
 const ORDER_TOOL = {
   name: "record_order",
   description:
-    "سجّل طلب الزبون فور ما يأكد كل تفاصيله صراحة (الأصناف والكمية، ومنطقة التوصيل أو الاستلام، ورقم تواصل لو أعطاك واحد مختلف عن رقمه الحالي). استخدمها مرة وحدة بس لكل طلب مؤكد — ما تستخدمها لو الزبون لسا عم يسأل أو يفكر.",
+    "سجّل طلب الزبون فور ما يأكد كل تفاصيله صراحة (الأصناف والكمية، طريقة الاستلام، ورقم تواصل لو أعطاك واحد مختلف عن رقمه الحالي). استخدمها مرة وحدة بس لكل طلب مؤكد — ما تستخدمها لو الزبون لسا عم يسأل أو يفكر.",
   input_schema: {
     type: "object",
     properties: {
@@ -14,19 +14,56 @@ const ORDER_TOOL = {
         type: "string",
         description: "ملخص الأصناف والكميات يلي أكدها الزبون بالضبط، مثال: '2x زنجر, 1x كومبو عائلي'",
       },
+      fulfillment: {
+        type: "string",
+        enum: ["delivery", "pickup"],
+        description: "طريقة الاستلام: delivery (توصيل) أو pickup (استلام من الفرع)",
+      },
       area: {
         type: "string",
-        description: "منطقة التوصيل يلي أكدها الزبون، أو 'استلام من الفرع' لو رح يجي يستلم",
+        description: "لو توصيل: المنطقة أو العنوان يلي أكده الزبون (أو العنوان المحسوب من الموقع المباشر لو بعته). لو استلام، اتركها فاضية واستخدم حقل branch بدالها.",
+      },
+      branch: {
+        type: "string",
+        description: "لو استلام من الفرع: اسم الفرع بالضبط يلي الزبون رح يستلم منه (من قائمة الفروع بالأعلى). اتركها فاضية لو توصيل.",
+      },
+      subtotal: {
+        type: "number",
+        description: "مجموع سعر الأصناف بس (بدون رسم التوصيل)، بعد ما تطرح أي خصم مؤكد (قسم 'خصم الزبون' لو ظهر). اتركها فاضية إذا في سعر صنف مش مسجل بعد.",
+      },
+      deliveryFee: {
+        type: "number",
+        description: "رسم التوصيل بالدينار — استخدم الرقم المحسوب فعلياً (من قسم الموقع المباشر أو من قائمة المناطق). اتركها فاضية أو 0 لو استلام من الفرع.",
       },
       totalPrice: {
         type: "number",
-        description: "المجموع الكلي بالدينار الأردني إذا كانت كل الأسعار معروفة من المنيو ورسوم التوصيل، بعد ما تطرح أي خصم مؤكد (قسم 'خصم الزبون' لو ظهر). اتركها فاضية إذا في سعر مش مسجل بعد.",
+        description: "المجموع الكلي = subtotal + deliveryFee (0 لو استلام). اتركها فاضية إذا subtotal مش معروف بعد.",
       },
       customerName: { type: "string", description: "اسم الزبون لو انذكر بالمحادثة" },
       contactPhone: { type: "string", description: "رقم تواصل بديل لو الزبون أعطاك واحد غير رقمه الحالي" },
-      notes: { type: "string", description: "أي ملاحظات إضافية بالطلب (وقت توصيل مفضّل، طلب خاص، إلخ)" },
+      contactMethod: {
+        type: "string",
+        description: "طريقة التواصل المفضلة يلي حددها الزبون صراحة لمتابعة طلبه (مثلاً 'واتساب' أو 'اتصال هاتفي' أو غيرها). اتركها فاضية لو ما حدد شي.",
+      },
+      notes: { type: "string", description: "أي ملاحظات إضافية بالطلب (وقت توصيل مفضّل، طلب خاص، حجز لوقت الفتح لو المحل مسكر هلأ، إلخ)" },
     },
-    required: ["itemsSummary", "area"],
+    required: ["itemsSummary", "fulfillment"],
+  },
+};
+
+// أداة إرسال صورة صنف — استعملها الموديل بوعي بحالتين بس: الزبون طلب صورة صراحة، أو الزبون محتار وقرر
+// يغريه بصنف معيّن. هاي بديل عن الطريقة القديمة (فحص نص الرد بحثاً عن أسماء أصناف) يلي كانت ترسل صور
+// لمجرد إنو اسم الصنف انذكر بالرد ولو بسياق عادي — الأداة هلأ بتخلي الإرسال قرار واعي من الموديل نفسه.
+const SEND_PHOTO_TOOL = {
+  name: "send_photo",
+  description:
+    "استخدمها بس بحالتين: (1) الزبون طلب صراحة يشوف صورة صنف، أو (2) الزبون محتار مش عارف شو يطلب وقررت توصيله بصنف معيّن وحابب تغريه بصورته. ما تستخدمها لمجرد ذكر اسم صنف بسياق عادي بردك — الاستخدام الزايد بزعج الزبون بصور ما طلبها.",
+  input_schema: {
+    type: "object",
+    properties: {
+      itemName: { type: "string", description: "اسم الصنف بالضبط أو أقرب صيغة له متل ما هو مسجل بقائمة المنيو" },
+    },
+    required: ["itemName"],
   },
 };
 
@@ -38,7 +75,7 @@ const ORDER_TOOL = {
  * @param {{name?:string, phone?:string, area?:string, lastItems?:string[], lastOrderAt?:string} | null} customerProfile - بيانات الزبون من طلب سابق (لو موجودة)
  * @param {{vip?: {percent:number,name:string|null}, code?: {code:string,kind:string,value:number}} | null} discountContext - خصم VIP أو كود خصم متأكد منه لهالرسالة (لو في)
  * @param {{address?:string|null, branch?:object|null, distanceKm?:number|null, fee?:number|null, estimated?:boolean} | null} locationContext - موقع مباشر بعته الزبون بهالرسالة، محسوب سلفاً (deliveryCalc.js)
- * @returns {Promise<{reply: string, order: object|null}>} رد البوت النصي + تفاصيل الطلب لو تأكد هالرسالة
+ * @returns {Promise<{reply: string, order: object|null, requestedPhotos: string[]}>} رد البوت النصي + تفاصيل الطلب لو تأكد هالرسالة + أسماء أي صور صنف قرر الموديل يرسلها بوعي
  */
 async function generateReply(history, userMessage, image = null, configId = "default", customerProfile = null, discountContext = null, locationContext = null) {
   const systemPrompt = buildSystemPrompt(configId);
@@ -79,7 +116,7 @@ async function generateReply(history, userMessage, image = null, configId = "def
         ...(locationSection ? [{ type: "text", text: locationSection }] : []),
       ],
       messages,
-      tools: [ORDER_TOOL],
+      tools: [ORDER_TOOL, SEND_PHOTO_TOOL],
     }),
   });
 
@@ -91,10 +128,12 @@ async function generateReply(history, userMessage, image = null, configId = "def
   const data = await response.json();
   const textBlock = data.content.find((b) => b.type === "text");
   const toolBlock = data.content.find((b) => b.type === "tool_use" && b.name === "record_order");
+  const photoBlocks = data.content.filter((b) => b.type === "tool_use" && b.name === "send_photo");
 
   return {
     reply: textBlock ? textBlock.text : "",
     order: toolBlock ? toolBlock.input : null,
+    requestedPhotos: photoBlocks.map((b) => b.input?.itemName).filter(Boolean),
   };
 }
 
