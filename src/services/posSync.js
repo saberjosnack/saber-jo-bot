@@ -1,6 +1,29 @@
+const fs = require("fs");
+const path = require("path");
 const env = require("../config/env");
 const store = require("./store");
 const botStore = require("./botStore");
+
+const EXT_BY_MIME = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+// صورة الصنف بالكاشير مخزّنة كـ base64 data-URL مباشرة بقاعدة البيانات (مش رابط استضافة حقيقي) — بنفك
+// ترميزها ونحفظها كملف حقيقي بنفس مجلد صور المنيو يلي البوت أصلاً بيستخدمه (شوف routes/bots.js:
+// /menu/:itemId/image)، عشان تصير رابط http عادي يقدر واتساب/ماسنجر/انستجرام يجيبه ويرسله للزبون.
+function saveDataUrlImage(configId, posId, dataUrl) {
+  try {
+    const match = /^data:(image\/[a-z]+);base64,(.+)$/.exec(dataUrl);
+    if (!match) return null;
+    const ext = EXT_BY_MIME[match[1]] || "jpg";
+    const dir = path.join(__dirname, "..", "data", "uploads", "menu", configId);
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${posId}.${ext}`;
+    fs.writeFileSync(path.join(dir, filename), Buffer.from(match[2], "base64"));
+    return `${env.appBaseUrl}/uploads/menu/${configId}/${filename}?v=${Date.now()}`;
+  } catch (err) {
+    console.error(`[posSync] فشل حفظ صورة الصنف ${posId} من الكاشير:`, err.message);
+    return null;
+  }
+}
 
 // بيانات ربط الكاشير (POS) — Supabase مشترك مع تطبيق الكاشير (App-sjs). بنقرأ بس (GET عن طريق REST مباشرة)،
 // ما بنكتب ولا نعدّل أي شي بقاعدة بيانات الكاشير من هون إطلاقاً.
@@ -59,28 +82,30 @@ async function fetchPosCustomerVip(phone) {
 // بيدمج أصناف الكاشير مع منيو البوت الحالي — الكاشير هو مصدر الحقيقة لوجود الصنف وسعره وتوفره وصورته،
 // بس منحافظ على "صنف مميز" (featured/featuredNote) يلي المالك حدده يدوياً من داشبورد البوت لنفس الصنف
 // (مطابقة عن طريق posId الثابت، مش الاسم، عشان تغيير بسيط بالاسم ما يكسر الربط ولا يفقد صفة "مميز").
-function mergeMenu(existingMenu, posItems) {
+// صورة الصنف: لو الكاشير عندو صورة، بنفك ترميزها ونحفظها كملف حقيقي (شوف saveDataUrlImage) ونستخدمها؛
+// لو الكاشير ما عندو صورة لهاد الصنف، منحافظ على أي صورة رفعها المالك يدوياً من قبل من داشبورد البوت.
+async function mergeMenu(configId, existingMenu, posItems) {
   const existingByPosId = new Map(existingMenu.filter((i) => i.posId).map((i) => [i.posId, i]));
 
-  return posItems.map((p) => {
-    const prev = existingByPosId.get(p.id);
-    return {
-      // id لازم يبقى ثابت ومطابق لمعرّف الكاشير — الداشبورد (تبويب المنيو، رفع صور الأصناف) بيعتمد على
-      // حقل "id" بالضبط عشان يعرف/يعدّل الصنف (شوف routes/bots.js: /menu/:itemId/image).
-      id: p.id,
-      posId: p.id,
-      name: p.name_ar || prev?.name || "",
-      category: p.category || prev?.category || "",
-      price: typeof p.price === "number" ? p.price : null,
-      available: Boolean(p.is_available),
-      // ما بنجيب صورة الكاشير (image_url) — هناك مخزّنة كـ base64 data-URL ضخم مش رابط حقيقي، وما بينشتغل
-      // مع طريقة إرسال الصور الحالية بالبوت (واتساب/ماسنجر/انستجرام بتحتاج رابط http حقيقي). المالك برفع
-      // صورة الصنف من داشبورد البوت نفسه (تبويب المنيو) زي ما هو معتاد، وهاي بتضل محفوظة عبر أي تحديث.
-      imageUrl: prev?.imageUrl || "",
-      featured: prev?.featured || false,
-      featuredNote: prev?.featuredNote || "",
-    };
-  });
+  return Promise.all(
+    posItems.map(async (p) => {
+      const prev = existingByPosId.get(p.id);
+      const posImage = p.image_url ? saveDataUrlImage(configId, p.id, p.image_url) : null;
+      return {
+        // id لازم يبقى ثابت ومطابق لمعرّف الكاشير — الداشبورد (تبويب المنيو، رفع صور الأصناف) بيعتمد على
+        // حقل "id" بالضبط عشان يعرف/يعدّل الصنف (شوف routes/bots.js: /menu/:itemId/image).
+        id: p.id,
+        posId: p.id,
+        name: p.name_ar || prev?.name || "",
+        category: p.category || prev?.category || "",
+        price: typeof p.price === "number" ? p.price : null,
+        available: Boolean(p.is_available),
+        imageUrl: posImage || prev?.imageUrl || "",
+        featured: prev?.featured || false,
+        featuredNote: prev?.featuredNote || "",
+      };
+    })
+  );
 }
 
 /**
@@ -95,7 +120,7 @@ async function syncBotFromPos(botId) {
   const [posItems, posCodes] = await Promise.all([fetchPosMenuItems(), fetchPosActiveDiscountCodes()]);
 
   const existingMenu = store.read(`configs/${bot.configId}/menu.json`);
-  const mergedMenu = mergeMenu(Array.isArray(existingMenu) ? existingMenu : [], posItems || []);
+  const mergedMenu = await mergeMenu(bot.configId, Array.isArray(existingMenu) ? existingMenu : [], posItems || []);
   store.write(`configs/${bot.configId}/menu.json`, mergedMenu);
   store.write(`configs/${bot.configId}/discountCodes.json`, posCodes || []);
 
