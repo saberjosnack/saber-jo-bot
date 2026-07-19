@@ -140,6 +140,9 @@ async function startBotConnection(botId) {
         messages.map((m) => ({
           fromMe: m.key.fromMe,
           remoteJid: m.key.remoteJid,
+          senderPn: m.key.senderPn,
+          participantPn: m.key.participantPn,
+          senderLid: m.key.senderLid,
           hasMessage: !!m.message,
           messageKeys: m.message ? Object.keys(m.message) : [],
         }))
@@ -152,13 +155,17 @@ async function startBotConnection(botId) {
       if (msg.key.fromMe || !msg.message) continue;
 
       // واتساب صار يبعت رسائل بعض الزبائن بمعرّف "@lid" (Linked ID) بدل رقم الهاتف العادي "@s.whatsapp.net"
-      // (نظام خصوصية أحدث بيخفي رقم الزبون الحقيقي). لو مسحنا اللاحقة زي ما كنا نعمل قبل، بيضل الرقم
-      // بدون أي لاحقة، وبعدين toJid() بترجع تضيفله "@s.whatsapp.net" غلط فيصير معرّف تالف زي
-      // "123@lid@s.whatsapp.net" — وهاد بالضبط سبب انقطاع الاتصال المفاجئ لما نحاول نرد (stream error:
-      // xml-not-well-formed). فلازم نخلي معرّف الـ lid كامل زي ما هو، وما نحاول نرجعه لرقم عادي.
-      const from = msg.key.remoteJid?.endsWith("@lid")
-        ? msg.key.remoteJid
-        : msg.key.remoteJid?.replace("@s.whatsapp.net", "");
+      // (نظام خصوصية أحدث بيخفي رقم الزبون الحقيقي). أول محاولة عملناها كانت نخلي معرّف الـ lid كامل
+      // ونرد عليه مباشرة — بس واتساب رفض الرسائل المرسلة مباشرة لمعرّف lid (خطأ 463 بالـ ack)، يعني
+      // الرد ما بيوصل للزبون أبداً حتى لو الاتصال ما انقطع. الحل الصحيح: Baileys بيرفق أحياناً رقم
+      // الهاتف الحقيقي مع الرسالة (senderPn/participantPn) حتى لو الـ JID الأساسي lid — نستخدمه هو
+      // للرد بدل الـ lid نفسه لو موجود، لأنو الرد لرقم هاتف عادي بيوصل فعلياً.
+      const realPn = msg.key.senderPn || msg.key.participantPn;
+      const from = realPn
+        ? realPn.replace("@s.whatsapp.net", "")
+        : msg.key.remoteJid?.endsWith("@lid")
+          ? msg.key.remoteJid
+          : msg.key.remoteJid?.replace("@s.whatsapp.net", "");
       let text =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
