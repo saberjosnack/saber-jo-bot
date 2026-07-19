@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const botStore = require("./botStore");
 const { queueIncomingMessage } = require("./messageHandler");
@@ -19,6 +20,18 @@ const connections = new Map(); // botId -> { sock, qr, status }
 
 function authFolder(botId) {
   return path.join(__dirname, "..", "data", "bots", botId, "wa-auth");
+}
+
+// بيمسح جلسة الاتصال المحفوظة على القرص. لازم نعمل هاد لما واتساب يسجّل خروج الجلسة فعلياً (401) —
+// وإلا أي محاولة اتصال جاية (تلقائية أو يدوية) بترجع تستخدم نفس الجلسة الملغاة وترفض فوراً بنفس الخطأ (401)
+// بدون ما تعرض رمز QR جديد أبداً، فيضل البوت عالق "منقطع" للأبد حتى لو حاولنا نعيد المحاولة ألف مرة.
+function clearAuthFolder(botId) {
+  try {
+    fs.rmSync(authFolder(botId), { recursive: true, force: true });
+    console.log(`[wa:${botId}] مسحت جلسة الاتصال القديمة (كانت ملغاة) — أي محاولة اتصال جاية رح تطلع رمز QR جديد.`);
+  } catch (err) {
+    console.error(`[wa:${botId}] فشل مسح جلسة الاتصال القديمة:`, err.message);
+  }
 }
 
 // بيعيد محاولة الاتصال بعد فترة انتظار (بتزيد تدريجياً لحد سقف دقيقة)، وبيكرر المحاولة تلقائياً لو فشلت
@@ -106,6 +119,9 @@ async function startBotConnection(botId) {
         // عابرة قبل ما يتفتح أي socket أصلاً) ما يضل الاتصال عالق "منقطع" للأبد بصمت بدون أي محاولة تانية.
         scheduleReconnect(botId);
       } else {
+        // تسجيل خروج حقيقي (401) — منمسح الجلسة المحفوظة فوراً، وإلا كل محاولة جاية (تلقائية عالبووت
+        // أو زر "إعادة تشغيل الاتصال" اليدوي) بترجع تستخدم نفس الجلسة الملغاة وتفشل بنفس الخطأ من غير ما يطلع QR جديد أبداً.
+        clearAuthFolder(botId);
         botStore.updateBot(botId, { status: "pending_connection" });
       }
     }
@@ -174,13 +190,23 @@ async function restartBotConnection(botId) {
     }
   }
   connections.delete(botId);
+
+  // لو كانت الجلسة عالقة "منقطعة" أصلاً (401 ملغاة غالباً)، مسحها هون كمان — الزر هاد معناه "ابلش من جديد"،
+  // فلو ضلينا نستخدم نفس الجلسة الملغاة رح نرجع نفس الخطأ من غير ما يطلع QR جديد أبداً.
+  if (existing?.status === "disconnected" || existing?.status === "not_started") {
+    clearAuthFolder(botId);
+  }
+
   return startBotConnection(botId);
 }
 
 async function startAllActiveBots() {
   const bots = botStore.listBots();
   for (const bot of bots) {
-    if (bot.status === "active" || bot.status === "pending_connection") {
+    // بس بوتات "اتصال مباشر" (QR/Baileys) فعلياً — قبل هاد الإصلاح كنا نحاول نفتح اتصال Baileys
+    // حتى لبوتات مربوطة بمزود مستضاف (Wasender/UltraMsg/...)، فيطلع خطأ 401 وهمي بالـ logs كل مرة السيرفر يعيد التشغيل
+    // من غير أي داعي، لأنو هيك بوتات أصلاً ما إلها جلسة Baileys حقيقية مربوطة.
+    if (bot.waProvider === "selfhosted" && (bot.status === "active" || bot.status === "pending_connection")) {
       startBotConnection(bot.id).catch((err) =>
         console.error(`فشل بدء اتصال البوت ${bot.name}:`, err)
       );
