@@ -12,6 +12,7 @@ const wa = require("../services/selfHostedWhatsapp");
 const whatsapp = require("../services/whatsapp");
 const { recordOrder } = require("../services/messageHandler");
 const { recoverMissedOrder, looksLikeMissedOrderConfirmation } = require("../services/ai");
+const posSync = require("../services/posSync");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -159,6 +160,43 @@ router.post("/:id/whatsapp-restart", requireRole("owner", "orders"), async (req,
     await wa.restartBotConnection(bot.id);
     res.json({ message: "تم إعادة تشغيل الاتصال — استنى ثواني ويطلع رمز QR لو الجلسة القديمة انتهت." });
   } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------- ربط نظام الكاشير (POS) — مزامنة المنيو وأكواد الخصم من App-sjs ----------
+// تشغيل/إيقاف المزامنة التلقائية (كل ساعة) لهاد البوت — التوفر الفعلي لربط الكاشير نفسه (رابط/مفتاح Supabase)
+// معرّف على مستوى السيرفر كله (env)، مش لكل بوت، لأنو حالياً POS واحد بس مربوط.
+router.put("/:id/pos-sync", requireRole("owner"), (req, res) => {
+  try {
+    const bot = botStore.getBot(req.params.id);
+    if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+    const updated = botStore.updateBot(req.params.id, {
+      posSync: { ...bot.posSync, enabled: Boolean(req.body.enabled) },
+    });
+    res.json(updated.posSync);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// زر "تحديث الآن" بالداشبورد — يسحب المنيو وأكواد الخصم من الكاشير فوراً بدل ما ينتظر المزامنة التلقائية (كل ساعة)
+router.post("/:id/pos-sync/run", requireRole("owner", "orders"), async (req, res) => {
+  try {
+    const bot = botStore.getBot(req.params.id);
+    if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+    if (!posSync.posConfigured()) {
+      return res.status(400).json({ error: "ربط الكاشير مش مفعّل بالسيرفر بعد (POS_SUPABASE_URL/POS_SUPABASE_KEY)." });
+    }
+    const result = await posSync.syncBotFromPos(req.params.id);
+    const updated = botStore.updateBot(req.params.id, {
+      posSync: { ...bot.posSync, lastSyncAt: new Date().toISOString(), lastError: null },
+    });
+    res.json({ ...result, posSync: updated.posSync });
+  } catch (err) {
+    botStore.updateBot(req.params.id, {
+      posSync: { ...botStore.getBot(req.params.id)?.posSync, lastSyncAt: new Date().toISOString(), lastError: err.message },
+    });
     res.status(400).json({ error: err.message });
   }
 });
@@ -312,8 +350,9 @@ router.post("/:id/menu/:itemId/image", requireRole("owner", "orders"), uploadSin
   const imageUrl = `${env.appBaseUrl}/uploads/menu/${bot.configId}/${filename}?v=${Date.now()}`;
 
   const menu = store.read(`configs/${bot.configId}/menu.json`);
-  const itemId = Number(req.params.itemId);
-  const updated = menu.map((i) => (i.id === itemId ? { ...i, imageUrl } : i));
+  // مقارنة كنص دايماً — أصناف مضافة يدوياً معرّفها رقم (Date.now())، وأصناف مزامَنة من الكاشير معرّفها
+  // نص (UUID)، فمقارنة Number() القديمة كانت رح تفشل بصمت (NaN) على أي صنف جاي من الكاشير.
+  const updated = menu.map((i) => (String(i.id) === req.params.itemId ? { ...i, imageUrl } : i));
   store.write(`configs/${bot.configId}/menu.json`, updated);
 
   res.json({ imageUrl });
@@ -324,8 +363,7 @@ router.delete("/:id/menu/:itemId/image", requireRole("owner", "orders"), (req, r
   if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
 
   const menu = store.read(`configs/${bot.configId}/menu.json`);
-  const itemId = Number(req.params.itemId);
-  const updated = menu.map((i) => (i.id === itemId ? { ...i, imageUrl: null } : i));
+  const updated = menu.map((i) => (String(i.id) === req.params.itemId ? { ...i, imageUrl: null } : i));
   store.write(`configs/${bot.configId}/menu.json`, updated);
 
   res.json({ message: "تم حذف صورة الصنف." });

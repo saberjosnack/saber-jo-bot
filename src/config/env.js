@@ -46,4 +46,9 @@ module.exports = {
   smtpUser: process.env.SMTP_USER,
   smtpPass: process.env.SMTP_PASS,
   mailFrom: process.env.MAIL_FROM || "noreply@saberjo.com",
+
+  // ---------- ربط نظام الكاشير (POS) — Supabase مشترك مع تطبيق الكاشير (App-sjs) ----------
+  // بنقرأ بس (منيو، تصنيفات، أكواد خصم، وخصم VIP لكل زبون) — ما بنكتب ولا نعدّل أي شي بقاعدة بيانات الكاشير.
+  posSupabaseUrl: process.env.POS_SUPABASE_URL || null,
+  posSupabaseKey: process.env.POS_SUPABASE_KEY || null,
 };

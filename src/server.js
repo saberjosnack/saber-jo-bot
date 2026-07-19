@@ -42,6 +42,16 @@ app.use("/uploads", express.static(path.join(__dirname, "data", "uploads")));
 const wa = require("./services/selfHostedWhatsapp");
 wa.startAllActiveBots().catch((err) => console.error("فشل بدء اتصالات البوتات:", err));
 
+// مزامنة تلقائية للمنيو وأكواد الخصم من الكاشير (POS) كل ساعة — لأي بوت مفعّل عليه posSync.enabled.
+// بلشة أولى بعد 30 ثانية من الإقلاع (مش فوراً، عشان نعطي باقي الإعداد فرصة يخلص)، وبعدها كل ساعة بالضبط.
+const posSync = require("./services/posSync");
+setTimeout(() => {
+  posSync.runScheduledPosSync().catch((err) => console.error("[posSync] فشل أول مزامنة تلقائية:", err.message));
+  setInterval(() => {
+    posSync.runScheduledPosSync().catch((err) => console.error("[posSync] فشلت مزامنة تلقائية:", err.message));
+  }, 60 * 60 * 1000);
+}, 30000);
+
 app.listen(env.port, () => {
   console.log(`Saber Jo Snack API شغال على المنفذ ${env.port}`);
   console.log(`WA_PROVIDER الحالي: ${env.waProvider}`);

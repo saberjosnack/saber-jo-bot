@@ -86,6 +86,36 @@ function getCustomerProfile(botId, from) {
   }
 }
 
+// خصم VIP (حي من الكاشير برقم هاتف الزبون) + كود خصم عام (لو الزبون كتب كلمة مطابقة لكود مزامَن من الكاشير) —
+// منجهزهم قبل ما نستدعي الذكاء الاصطناعي، وما منحطهم أبداً بالبرومبت الثابت (المخزّن مؤقتاً) عشان:
+// 1) ما ننكشف قائمة الأكواد كاملة للموديل (وبالتالي ما يقدر "يسردها" لأي زبون يسأل)، وبس يعرف نتيجة الكود يلي الزبون كتبه فعلاً.
+// 2) خصم VIP خاص بزبون واحد بالذات، فمعناه ما إله مكان بمحتوى مشترك بين كل الزبائن أصلاً.
+async function getDiscountContext(botId, configId, from, text) {
+  const posSync = require("./posSync"); // require جوا الدالة لتفادي دورة استدعاء بين الملفين
+  const result = { vip: null, code: null };
+
+  if (posSync.posConfigured()) {
+    try {
+      result.vip = await withTimeout(posSync.fetchPosCustomerVip(from), 5000, "fetchPosCustomerVip");
+    } catch (err) {
+      trace(`getDiscountContext: فشل فحص خصم VIP لـ ${from}: ${err.message}`);
+    }
+  }
+
+  try {
+    const codes = store.exists(`configs/${configId}/discountCodes.json`) ? store.read(`configs/${configId}/discountCodes.json`) : [];
+    if (Array.isArray(codes) && codes.length && text) {
+      const words = text.match(/[A-Za-z0-9_-]{3,20}/g) || [];
+      const upperWords = new Set(words.map((w) => w.toUpperCase()));
+      result.code = codes.find((c) => upperWords.has(String(c.code).toUpperCase())) || null;
+    }
+  } catch (err) {
+    trace(`getDiscountContext: فشل فحص كود الخصم: ${err.message}`);
+  }
+
+  return result.vip || result.code ? result : null;
+}
+
 // بيحفظ/يحدّث بيانات الزبون بعد كل طلب مؤكد (الاسم، رقم التواصل، آخر عنوان) — مخزنة لكل بوت لحاله.
 function upsertCustomerProfile(botId, from, order, items) {
   try {
@@ -249,11 +279,12 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   const history = conversations[from] || [];
 
   const customerProfile = getCustomerProfile(botId, from);
-  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length}, زبون سابق=${customerProfile ? "نعم" : "لا"})...`);
+  const discountContext = await getDiscountContext(botId, bot.configId, from, text);
+  trace(`handleIncomingMessage: بدأت أستدعي generateReply لـ ${from} (historyLen=${history.length}, زبون سابق=${customerProfile ? "نعم" : "لا"}, خصم=${discountContext ? "نعم" : "لا"})...`);
   let reply, order;
   try {
     const result = await withTimeout(
-      generateReply(history, text, image, bot.configId, customerProfile),
+      generateReply(history, text, image, bot.configId, customerProfile, discountContext),
       AI_TIMEOUT_MS,
       "generateReply"
     );

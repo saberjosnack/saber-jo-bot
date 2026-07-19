@@ -1,5 +1,5 @@
 const env = require("../config/env");
-const { buildSystemPrompt, buildCustomerProfileSection } = require("./promptBuilder");
+const { buildSystemPrompt, buildCustomerProfileSection, buildDiscountSection } = require("./promptBuilder");
 
 // أداة تسجيل الطلب — الموديل يستدعيها لما الزبون يأكد كل تفاصيل طلبه صراحة (اسمها بالبرومبت أيضاً، شوف promptBuilder.js).
 // لما تنستدعى، منسجل الطلب بلوحة التحكم ومنبعته لجروب الواتساب (لو مفعّل) بشكل منفصل تماماً عن أي شي الموديل شافه أو قاله للزبون.
@@ -20,7 +20,7 @@ const ORDER_TOOL = {
       },
       totalPrice: {
         type: "number",
-        description: "المجموع الكلي بالدينار الأردني إذا كانت كل الأسعار معروفة من المنيو ورسوم التوصيل. اتركها فاضية إذا في سعر مش مسجل بعد.",
+        description: "المجموع الكلي بالدينار الأردني إذا كانت كل الأسعار معروفة من المنيو ورسوم التوصيل، بعد ما تطرح أي خصم مؤكد (قسم 'خصم الزبون' لو ظهر). اتركها فاضية إذا في سعر مش مسجل بعد.",
       },
       customerName: { type: "string", description: "اسم الزبون لو انذكر بالمحادثة" },
       contactPhone: { type: "string", description: "رقم تواصل بديل لو الزبون أعطاك واحد غير رقمه الحالي" },
@@ -36,13 +36,15 @@ const ORDER_TOOL = {
  * @param {{base64: string, mediaType: string} | null} image - صورة أرسلها الزبون (اختياري)
  * @param {string} configId - أي بوت/قالب إعدادات نستخدم
  * @param {{name?:string, phone?:string, area?:string, lastItems?:string[], lastOrderAt?:string} | null} customerProfile - بيانات الزبون من طلب سابق (لو موجودة)
+ * @param {{vip?: {percent:number,name:string|null}, code?: {code:string,kind:string,value:number}} | null} discountContext - خصم VIP أو كود خصم متأكد منه لهالرسالة (لو في)
  * @returns {Promise<{reply: string, order: object|null}>} رد البوت النصي + تفاصيل الطلب لو تأكد هالرسالة
  */
-async function generateReply(history, userMessage, image = null, configId = "default", customerProfile = null) {
+async function generateReply(history, userMessage, image = null, configId = "default", customerProfile = null, discountContext = null) {
   const systemPrompt = buildSystemPrompt(configId);
-  // بيانات الزبون منفصلة عن البرومبت الثابت أعلاه — عمداً بدون cache_control، عشان ما نكسر كاش
-  // البرومبت الكبير (منيو/إعدادات) يلي مشترك بين كل الزبائن. هاي بلوك صغير خاص بهاد الزبون بس.
+  // بيانات الزبون + الخصم منفصلين عن البرومبت الثابت أعلاه — عمداً بدون cache_control، عشان ما نكسر كاش
+  // البرومبت الكبير (منيو/إعدادات) يلي مشترك بين كل الزبائن. هاي بلوكات صغيرة خاصة بهاد الزبون/الرسالة بس.
   const customerSection = buildCustomerProfileSection(customerProfile);
+  const discountSection = buildDiscountSection(discountContext);
 
   const userContent = image
     ? [
@@ -71,6 +73,7 @@ async function generateReply(history, userMessage, image = null, configId = "def
       system: [
         { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
         ...(customerSection ? [{ type: "text", text: customerSection }] : []),
+        ...(discountSection ? [{ type: "text", text: discountSection }] : []),
       ],
       messages,
       tools: [ORDER_TOOL],
