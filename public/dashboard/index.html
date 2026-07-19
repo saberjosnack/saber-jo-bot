@@ -1021,58 +1021,159 @@ function OrdersPanel({ bot, api }) {
   );
 }
 
+function ConvoAvatar({ name }) {
+  const letter = (name || "؟").trim().charAt(0) || "؟";
+  return (
+    <div style={{
+      width: 40, height: 40, borderRadius: "50%", background: "var(--panel-2)", border: "1px solid var(--line)",
+      display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "var(--amber)", flexShrink: 0,
+    }}>
+      {letter}
+    </div>
+  );
+}
+
+function timeAgoShort(iso) {
+  if (!iso) return "—";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "الآن";
+  if (mins < 60) return `قبل ${mins}د`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `قبل ${hrs}س`;
+  const days = Math.floor(hrs / 24);
+  return `قبل ${days}ي`;
+}
+
+// واجهة "المحادثات" — شبه صندوق ماسنجر: قائمة محادثات على اليمين، وتفاصيل المحادثة المختارة بالنص كفقاعات رسائل،
+// مع فلتر "طلبوا بس" عشان توصل بسرعة لأي زبون سبق وأكد طلب (بدل ما تفتش بكل المحادثات).
 function ConversationsPanel({ bot, api }) {
   const [list, setList] = useState([]);
-  const [openFrom, setOpenFrom] = useState(null);
+  const [selectedFrom, setSelectedFrom] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all"); // "all" | "ordered"
+  const [search, setSearch] = useState("");
 
-  const load = () => { setLoading(true); api(`/api/bots/${bot.id}/conversations`).then((d) => { setList(d); setLoading(false); }).catch(() => setLoading(false)); };
+  const load = () => {
+    setLoading(true);
+    api(`/api/bots/${bot.id}/conversations`).then((d) => {
+      setList(d);
+      setLoading(false);
+      setSelectedFrom((prev) => (prev && d.some((c) => c.from === prev)) ? prev : (d[0]?.from || null));
+    }).catch(() => setLoading(false));
+  };
   useEffect(() => { load(); }, [bot.id]);
 
+  const orderedCount = list.filter((c) => c.hasOrdered).length;
+  const q = search.trim();
+  const filtered = list
+    .filter((c) => filter === "all" || c.hasOrdered)
+    .filter((c) => !q || (c.name || "").includes(q) || (c.phone || "").includes(q));
+
+  const selected = list.find((c) => c.from === selectedFrom) || null;
+
   return (
-    <div className="flexcol gap14">
+    <div className="flexcol gap14" style={{ height: "calc(100vh - 100px)" }}>
       <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontWeight: 700 }}>المحادثات ({list.length})</div>
         <button className="btn-ghost" style={{ fontSize: 12 }} onClick={load}>🔄 تحديث</button>
       </div>
-      <p style={{ fontSize: 12, color: "var(--ink-dim)", margin: 0 }}>
-        سجل بكل رسائل الزبائن وردود البوت — عشان تتأكد شو استقبل البوت فعلياً، حتى لو المحادثة ما انتهت بطلب مسجل.
-      </p>
 
-      {loading ? (
-        <p style={{ color: "var(--ink-dim)" }}>عم نحمّل...</p>
-      ) : list.length === 0 ? (
-        <p style={{ color: "var(--ink-dim)" }}>ولا محادثة لسا.</p>
-      ) : (
-        <div className="flexcol gap8">
-          {list.map((c) => (
-            <div key={c.from} className="panel-2" style={{ cursor: "pointer" }} onClick={() => setOpenFrom(openFrom === c.from ? null : c.from)}>
-              <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <span style={{ fontWeight: 700 }}>{c.name || "زبون"}</span>
-                  <span style={{ fontSize: 12, opacity: .7, marginRight: 8 }}>{c.phone}</span>
-                  {c.area && <span style={{ fontSize: 12, opacity: .7, marginRight: 8 }}>📍 {c.area}</span>}
-                </div>
-                <div className="flex gap8" style={{ alignItems: "center" }}>
-                  {c.paused && <span className="tag tag-off" style={{ fontSize: 10 }}>موقوف (تدخل بشري)</span>}
-                  <span style={{ fontSize: 11, color: "var(--ink-dim)" }}>{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("ar-JO") : "—"}</span>
-                </div>
-              </div>
-              {openFrom === c.from && (
-                <div className="ticket-divider flexcol gap8" style={{ fontSize: 13 }}>
-                  {c.messages.length === 0 && <div style={{ color: "var(--ink-dim)" }}>ولا رسالة محفوظة.</div>}
-                  {c.messages.map((m, i) => (
-                    <div key={i} style={{ textAlign: m.role === "user" ? "right" : "left" }}>
-                      <span style={{ fontSize: 11, color: "var(--ink-dim)" }}>{m.role === "user" ? "الزبون" : "البوت"}: </span>
-                      <span>{m.content}</span>
+      <div className="panel" style={{ flex: 1, display: "flex", padding: 0, overflow: "hidden", minHeight: 0 }}>
+        {/* قائمة المحادثات (شبه صندوق ماسنجر) */}
+        <div className="flexcol" style={{ width: 300, flexShrink: 0, borderLeft: "1px solid var(--line)", height: "100%" }}>
+          <div className="flexcol gap8" style={{ padding: 12, borderBottom: "1px solid var(--line)" }}>
+            <input placeholder="دور باسم أو رقم..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ fontSize: 13 }} />
+            <div className="flex gap8">
+              <div className={`chip ${filter === "all" ? "active" : ""}`} style={{ fontSize: 12 }} onClick={() => setFilter("all")}>الكل ({list.length})</div>
+              <div className={`chip ${filter === "ordered" ? "active" : ""}`} style={{ fontSize: 12 }} onClick={() => setFilter("ordered")}>🛒 طلبوا بس ({orderedCount})</div>
+            </div>
+          </div>
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {loading ? (
+              <p style={{ color: "var(--ink-dim)", padding: 14, fontSize: 13 }}>عم نحمّل...</p>
+            ) : filtered.length === 0 ? (
+              <p style={{ color: "var(--ink-dim)", padding: 14, fontSize: 13 }}>ولا محادثة مطابقة.</p>
+            ) : (
+              filtered.map((c) => {
+                const lastMsg = c.messages[c.messages.length - 1];
+                return (
+                  <div
+                    key={c.from}
+                    onClick={() => setSelectedFrom(c.from)}
+                    className="flex gap10"
+                    style={{
+                      padding: "10px 12px", cursor: "pointer", alignItems: "center",
+                      background: selectedFrom === c.from ? "var(--panel-2)" : "transparent",
+                      borderBottom: "1px solid var(--line)",
+                    }}
+                  >
+                    <ConvoAvatar name={c.name} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{c.name || c.phone || "زبون"}</span>
+                        <span style={{ fontSize: 10, color: "var(--ink-dim)", flexShrink: 0 }}>{timeAgoShort(c.lastMessageAt)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--ink-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {lastMsg ? lastMsg.content : "—"}
+                      </div>
+                      <div className="flex gap8" style={{ marginTop: 3 }}>
+                        {c.hasOrdered && <span className="tag tag-on" style={{ fontSize: 9, padding: "1px 8px" }}>🛒 طلب قبل</span>}
+                        {c.paused && <span className="tag tag-off" style={{ fontSize: 9, padding: "1px 8px" }}>موقوف</span>}
+                      </div>
                     </div>
-                  ))}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* المحادثة المختارة — فقاعات رسائل زي واجهة ماسنجر */}
+        <div className="flexcol" style={{ flex: 1, height: "100%", minWidth: 0 }}>
+          {!selected ? (
+            <div className="flex" style={{ alignItems: "center", justifyContent: "center", height: "100%", color: "var(--ink-dim)" }}>
+              اختر محادثة من القائمة
+            </div>
+          ) : (
+            <>
+              <div className="flex gap10" style={{ padding: 14, borderBottom: "1px solid var(--line)", alignItems: "center" }}>
+                <ConvoAvatar name={selected.name} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700 }}>{selected.name || "زبون"}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-dim)" }}>
+                    {selected.phone}{selected.area ? ` — 📍 ${selected.area}` : ""}
+                  </div>
+                </div>
+                {selected.hasOrdered && <span className="tag tag-on">🛒 طلب من قبل</span>}
+                {selected.paused && <span className="tag tag-off">موقوف (تدخل بشري)</span>}
+              </div>
+
+              {selected.hasOrdered && (
+                <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--ink-dim)", borderBottom: "1px solid var(--line)" }}>
+                  آخر طلب: {(selected.lastItems || []).join("، ") || "—"} {selected.lastOrderAt ? `— ${new Date(selected.lastOrderAt).toLocaleString("ar-JO")}` : ""}
                 </div>
               )}
-            </div>
-          ))}
+
+              <div className="flexcol gap8" style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+                {selected.messages.length === 0 && <div style={{ color: "var(--ink-dim)", fontSize: 13 }}>ولا رسالة محفوظة.</div>}
+                {selected.messages.map((m, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-start" : "flex-end" }}>
+                    <div style={{
+                      maxWidth: "70%", padding: "8px 12px", borderRadius: 14, fontSize: 13, lineHeight: 1.5,
+                      background: m.role === "user" ? "var(--panel-2)" : "var(--amber)",
+                      color: m.role === "user" ? "var(--ink)" : "#1a1200",
+                      border: m.role === "user" ? "1px solid var(--line)" : "none",
+                    }}>
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

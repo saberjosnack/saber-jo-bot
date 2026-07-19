@@ -407,6 +407,11 @@ router.get("/:id/conversations", requireRole("owner", "orders", "viewer"), (req,
     area: customers[from]?.area || "",
     paused: !!paused[from],
     lastMessageAt: lastActivity[from] || null,
+    // hasOrdered: عرفناها بوجود سجل بملف الزبائن — هاد الملف بس بينكتب لما طلب يتأكد فعلياً (recordOrder)،
+    // فوجوده معناه أكيد إن هاد الزبون طلب قبل هيك مرة وحدة عالأقل — مو مجرد محادثة بدون طلب.
+    hasOrdered: Boolean(customers[from]),
+    lastOrderAt: customers[from]?.lastOrderAt || null,
+    lastItems: customers[from]?.lastItems || [],
     messages: conversations[from] || [],
   }));
 
