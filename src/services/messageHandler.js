@@ -135,6 +135,10 @@ function computeHumanDelay(replyText, timing = DEFAULT_TIMING) {
 // أقصى عدد صور نبعتها تلقائياً على نفس الرد الواحد — حماية من إغراق الزبون بصور لو ذكر كذا صنف
 const MAX_AUTO_IMAGES_PER_REPLY = 2;
 
+// أقصى عدد صور من الزبون بنجمّعها بنفس دفعة التجميع الواحدة قبل ما نستدعي الذكاء الاصطناعي — لو الزبون
+// بعت أكتر من هيك بنفس النافذة الزمنية، منكتفي بأول عدد منهم (حماية بسيطة من تضخم حجم الطلب/التكلفة).
+const MAX_INCOMING_IMAGES_PER_BATCH = 4;
+
 function normalizeSpaces(s) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
@@ -355,14 +359,15 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
  * @param {string} botId - أي بوت استقبل الرسالة
  * @param {string} from - رقم الزبون
  * @param {string} text - نص الرسالة (ممكن يكون فاضي لو الرسالة صورة بس)
- * @param {{base64:string, mediaType:string}|null} image - صورة أرسلها الزبون (اختياري)
+ * @param {Array<{base64:string, mediaType:string}>} images - كل الصور يلي بعتها الزبون بنفس دفعة التجميع (ممكن تكون فاضية)
  * @param {(to:string, text:string) => Promise<void>} sendText - دالة الإرسال الخاصة بهاد البوت
  * @param {(to:string, imageUrl:string) => Promise<void>} [sendImage] - اختياري: دالة إرسال صورة (لإرسال صور الأصناف تلقائياً)
  * @param {string} [channel] - "whatsapp" | "messenger" | "instagram" — لتسجيله مع الطلب بس
  * @param {{lat:number, lng:number}|null} [location] - موقع مباشر بعته الزبون (Live/Pin Location) بهاي الرسالة (اختياري)
  */
-async function handleIncomingMessage(botId, from, text, image, sendText, sendImage, channel = "whatsapp", location = null) {
-  trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} hasImage=${!!image} hasLocation=${!!location}`);
+async function handleIncomingMessage(botId, from, text, images, sendText, sendImage, channel = "whatsapp", location = null) {
+  const imageList = Array.isArray(images) ? images.filter(Boolean) : images ? [images] : [];
+  trace(`handleIncomingMessage: بدأت botId=${botId} from=${from} textLen=${text?.length || 0} imagesCount=${imageList.length} hasLocation=${!!location}`);
   if (!from) return;
 
   const bot = botStore.getBot(botId);
@@ -440,7 +445,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   let reply, order, requestedPhotos = [];
   try {
     const result = await withTimeout(
-      generateReply(history, effectiveUserMessage, image, bot.configId, customerProfile, discountContext, locationContext),
+      generateReply(history, effectiveUserMessage, imageList, bot.configId, customerProfile, discountContext, locationContext),
       AI_TIMEOUT_MS,
       "generateReply"
     );
@@ -498,7 +503,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
     await recordOrder(bot, from, channel, order, locationContext);
   }
 
-  history.push({ role: "user", content: effectiveUserMessage || "[صورة]" });
+  history.push({ role: "user", content: effectiveUserMessage || (imageList.length > 1 ? "[صور]" : "[صورة]") });
   history.push({ role: "assistant", content: reply });
   conversations[from] = history.slice(-20);
   store.write(`bots/${botId}/conversations.json`, conversations);
@@ -517,7 +522,7 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   trace(`handleIncomingMessage: خلصت وحفظت المحادثة مع ${from}.`);
 }
 
-// key: `${botId}::${from}` -> { parts, image, sendText, onTypingStart, timer }
+// key: `${botId}::${from}` -> { parts, images, sendText, onTypingStart, timer }
 const pendingBuffers = new Map();
 
 function bufferKey(botId, from) {
@@ -537,7 +542,7 @@ async function flushBuffer(key) {
   const botId = key.slice(0, separatorIndex);
   const from = key.slice(separatorIndex + 2);
   const combinedText = buffer.parts.join("\n").trim();
-  trace(`flushBuffer: key=${key} partsCount=${buffer.parts.length} combinedTextLen=${combinedText.length} hasImage=${!!buffer.image} hasTypingFn=${!!buffer.onTypingStart}`);
+  trace(`flushBuffer: key=${key} partsCount=${buffer.parts.length} combinedTextLen=${combinedText.length} imagesCount=${buffer.images.length} hasTypingFn=${!!buffer.onTypingStart}`);
 
   if (buffer.onTypingStart) {
     try {
@@ -552,7 +557,7 @@ async function flushBuffer(key) {
 
   try {
     trace(`flushBuffer: بلشت handleIncomingMessage لـ ${key}`);
-    await handleIncomingMessage(botId, from, combinedText, buffer.image, buffer.sendText, buffer.sendImage, buffer.channel, buffer.location);
+    await handleIncomingMessage(botId, from, combinedText, buffer.images, buffer.sendText, buffer.sendImage, buffer.channel, buffer.location);
     trace(`flushBuffer: خلص handleIncomingMessage لـ ${key} بنجاح.`);
   } catch (err) {
     trace(`flushBuffer: خطأ بمعالجة الرسائل المجمّعة لـ ${key}: ${err.message}\n${err.stack}`);
@@ -612,7 +617,10 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
 
   if (existing) {
     if (text) existing.parts.push(text);
-    if (image) existing.image = image;
+    // بعد التصحيح: منجمع كل صورة توصل بنفس نافذة التجميع بمصفوفة (مش نكتب فوق الصورة السابقة) — قبل هيك
+    // كان `existing.image = image` بيمحي أي صورة سابقة وصلت بنفس الدفعة، فلو الزبون بعت صورتين ورا بعض
+    // بسرعة، الذكاء الاصطناعي كان يشوف الثانية بس ويتجاهل الأولى بصمت (وممكن يرد عليها بشكل ناقص أو غلط).
+    if (image && existing.images.length < MAX_INCOMING_IMAGES_PER_BATCH) existing.images.push(image);
     if (location) existing.location = location;
     existing.sendText = sendText;
     if (onTypingStart) existing.onTypingStart = onTypingStart;
@@ -620,13 +628,13 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
     if (channel) existing.channel = channel;
     clearTimeout(existing.timer);
     existing.timer = setTimeout(() => flushBuffer(key), debounceMs);
-    trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، أعدت ضبط التايمر (${debounceMs}ms).`);
+    trace(`queueIncomingMessage: أضفت لبفر موجود key=${key}، partsCount=${existing.parts.length}، imagesCount=${existing.images.length}، أعدت ضبط التايمر (${debounceMs}ms).`);
     return;
   }
 
   const buffer = {
     parts: text ? [text] : [],
-    image: image || null,
+    images: image ? [image] : [],
     location: location || null,
     sendText,
     onTypingStart,
