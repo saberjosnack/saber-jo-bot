@@ -128,7 +128,34 @@ router.put("/:id/connection", requireRole("owner"), (req, res) => {
       waProvider: waProvider || null,
       waCredentials: waCredentials || {},
     });
+
+    // لو المزود المختار "اتصال مباشر" ومش متصل حالياً، منبلش الاتصال فوراً — قبل هاد الإصلاح، تبديل بوت موجود
+    // أصلاً لمزود "اتصال مباشر" (أو إعادة حفظ نفس الإعداد) ما كان يشغّل أي اتصال أبداً، فيضل واقف على "عم نجهز رمز QR..." للأبد.
+    if (waProvider === "selfhosted") {
+      const { status } = wa.getQrStatus(req.params.id);
+      if (!["connected", "connecting", "waiting_for_scan"].includes(status)) {
+        wa.startBotConnection(req.params.id).catch((err) =>
+          console.error(`فشل بدء اتصال البوت ${req.params.id} بعد تغيير المزود لـ"اتصال مباشر":`, err.message)
+        );
+      }
+    }
+
     res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// زر "إعادة تشغيل الاتصال" بالداشبورد — لما الاتصال المباشر (QR) يعلق منقطع وما عم يرجع يتصل لحاله
+router.post("/:id/whatsapp-restart", requireRole("owner", "orders"), async (req, res) => {
+  try {
+    const bot = botStore.getBot(req.params.id);
+    if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+    if (bot.waProvider !== "selfhosted") {
+      return res.status(400).json({ error: "زر إعادة التشغيل هاد بس لبوتات الاتصال المباشر (QR)." });
+    }
+    await wa.restartBotConnection(bot.id);
+    res.json({ message: "تم إعادة تشغيل الاتصال — استنى ثواني ويطلع رمز QR لو الجلسة القديمة انتهت." });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -351,6 +378,42 @@ router.patch("/:id/orders/:orderId", requireRole("owner", "orders"), (req, res) 
   orders[idx] = { ...orders[idx], status, completedAt: status === "completed" ? new Date().toISOString() : null };
   store.write(`bots/${req.params.id}/orders.json`, orders);
   res.json(orders[idx]);
+});
+
+// ---------- سجل المحادثات (تبويب "المحادثات" بالداشبورد) — عشان نتأكد شو استقبل/رد البوت فعلياً لكل زبون،
+// ونكتشف بسرعة لو في محادثة ما انسجلها كطلب أو انقطعت بمنتصفها.
+router.get("/:id/conversations", requireRole("owner", "orders", "viewer"), (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+
+  const conversationsRaw = store.read(`bots/${req.params.id}/conversations.json`);
+  const conversations = Array.isArray(conversationsRaw) ? {} : conversationsRaw;
+
+  const customersRaw = store.exists(`bots/${req.params.id}/customers.json`) ? store.read(`bots/${req.params.id}/customers.json`) : {};
+  const customers = Array.isArray(customersRaw) ? {} : customersRaw;
+
+  const lastActivityRaw = store.exists(`bots/${req.params.id}/lastActivity.json`)
+    ? store.read(`bots/${req.params.id}/lastActivity.json`)
+    : {};
+  const lastActivity = Array.isArray(lastActivityRaw) ? {} : lastActivityRaw;
+
+  const pausedRaw = store.read(`bots/${req.params.id}/pausedConversations.json`);
+  const paused = Array.isArray(pausedRaw) ? {} : pausedRaw;
+
+  const list = Object.keys(conversations).map((from) => ({
+    from,
+    name: customers[from]?.name || "",
+    phone: customers[from]?.phone || from,
+    area: customers[from]?.area || "",
+    paused: !!paused[from],
+    lastMessageAt: lastActivity[from] || null,
+    messages: conversations[from] || [],
+  }));
+
+  // الأحدث أولاً (يلي ما عندهم وقت مسجل بعد — من قبل ما ضفنا هاي الميزة — بيطلعوا آخر شي)
+  list.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
+
+  res.json(list);
 });
 
 // ---------- قائمة جروبات الواتساب — عشان المالك يختار جروب "وجهة الطلبات" من الداشبورد مباشرة ----------

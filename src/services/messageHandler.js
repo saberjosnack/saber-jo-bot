@@ -283,6 +283,18 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   history.push({ role: "assistant", content: reply });
   conversations[from] = history.slice(-20);
   store.write(`bots/${botId}/conversations.json`, conversations);
+
+  // بنسجل وقت آخر رسالة لكل زبون بملف منفصل خفيف — بنستخدمه بس لترتيب تبويب "المحادثات" بالداشبورد
+  // من الأحدث للأقدم (conversations.json نفسه ما بيحافظ على ترتيب التحديث، بس ترتيب أول اتصال).
+  try {
+    const lastActivityRaw = store.read(`bots/${botId}/lastActivity.json`);
+    const lastActivity = Array.isArray(lastActivityRaw) ? {} : lastActivityRaw;
+    lastActivity[from] = new Date().toISOString();
+    store.write(`bots/${botId}/lastActivity.json`, lastActivity);
+  } catch (err) {
+    console.error("[messageHandler] فشل تحديث وقت آخر نشاط:", err.message);
+  }
+
   trace(`handleIncomingMessage: خلصت وحفظت المحادثة مع ${from}.`);
 }
 

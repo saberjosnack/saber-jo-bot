@@ -356,9 +356,29 @@ function ConnectionsPanel({ bot, api, refreshBots }) {
             </button>
           </div>
         ) : (
-          status === "connected" ? <div style={{ color: "var(--olive)" }}>متصل بواتساب ✅</div>
-            : qr ? (<div><img src={qr} style={{ width: 220, height: 220 }} /><p style={{ fontSize: 13, color: "var(--ink-dim)" }}>افتح واتساب على جوالك ← الأجهزة المرتبطة ← ربط جهاز، وامسح الرمز.</p></div>)
-            : <p style={{ color: "var(--ink-dim)" }}>عم نجهز رمز QR...</p>
+          <div>
+            {status === "connected" ? <div style={{ color: "var(--olive)" }}>متصل بواتساب ✅</div>
+              : qr ? (<div><img src={qr} style={{ width: 220, height: 220 }} /><p style={{ fontSize: 13, color: "var(--ink-dim)" }}>افتح واتساب على جوالك ← الأجهزة المرتبطة ← ربط جهاز، وامسح الرمز.</p></div>)
+              : <p style={{ color: "var(--ink-dim)" }}>عم نجهز رمز QR... (لو ضلت شوي وما طلع شي، دوس الزر تحت)</p>}
+            <button
+              className="btn-ghost"
+              style={{ marginTop: 10, fontSize: 12 }}
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                try {
+                  await api(`/api/bots/${bot.id}/whatsapp-restart`, { method: "POST" });
+                  setQr(null); setStatus("connecting");
+                } catch (e) {
+                  alert(e.message);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              {saving ? "..." : "🔄 إعادة تشغيل الاتصال"}
+            </button>
+          </div>
         )}
       </div>
 
@@ -1001,6 +1021,62 @@ function OrdersPanel({ bot, api }) {
   );
 }
 
+function ConversationsPanel({ bot, api }) {
+  const [list, setList] = useState([]);
+  const [openFrom, setOpenFrom] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => { setLoading(true); api(`/api/bots/${bot.id}/conversations`).then((d) => { setList(d); setLoading(false); }).catch(() => setLoading(false)); };
+  useEffect(() => { load(); }, [bot.id]);
+
+  return (
+    <div className="flexcol gap14">
+      <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontWeight: 700 }}>المحادثات ({list.length})</div>
+        <button className="btn-ghost" style={{ fontSize: 12 }} onClick={load}>🔄 تحديث</button>
+      </div>
+      <p style={{ fontSize: 12, color: "var(--ink-dim)", margin: 0 }}>
+        سجل بكل رسائل الزبائن وردود البوت — عشان تتأكد شو استقبل البوت فعلياً، حتى لو المحادثة ما انتهت بطلب مسجل.
+      </p>
+
+      {loading ? (
+        <p style={{ color: "var(--ink-dim)" }}>عم نحمّل...</p>
+      ) : list.length === 0 ? (
+        <p style={{ color: "var(--ink-dim)" }}>ولا محادثة لسا.</p>
+      ) : (
+        <div className="flexcol gap8">
+          {list.map((c) => (
+            <div key={c.from} className="panel-2" style={{ cursor: "pointer" }} onClick={() => setOpenFrom(openFrom === c.from ? null : c.from)}>
+              <div className="flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span style={{ fontWeight: 700 }}>{c.name || "زبون"}</span>
+                  <span style={{ fontSize: 12, opacity: .7, marginRight: 8 }}>{c.phone}</span>
+                  {c.area && <span style={{ fontSize: 12, opacity: .7, marginRight: 8 }}>📍 {c.area}</span>}
+                </div>
+                <div className="flex gap8" style={{ alignItems: "center" }}>
+                  {c.paused && <span className="tag tag-off" style={{ fontSize: 10 }}>موقوف (تدخل بشري)</span>}
+                  <span style={{ fontSize: 11, color: "var(--ink-dim)" }}>{c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("ar-JO") : "—"}</span>
+                </div>
+              </div>
+              {openFrom === c.from && (
+                <div className="ticket-divider flexcol gap8" style={{ fontSize: 13 }}>
+                  {c.messages.length === 0 && <div style={{ color: "var(--ink-dim)" }}>ولا رسالة محفوظة.</div>}
+                  {c.messages.map((m, i) => (
+                    <div key={i} style={{ textAlign: m.role === "user" ? "right" : "left" }}>
+                      <span style={{ fontSize: 11, color: "var(--ink-dim)" }}>{m.role === "user" ? "الزبون" : "البوت"}: </span>
+                      <span>{m.content}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const ROLES = [["owner","مدير كامل","وصول لكل شي"],["orders","موظف طلبات","الطلبات والمنيو بس"],["viewer","مشاهدة فقط","بدون تعديل"]];
 function EmployeesPanel({ api, allBots }) {
   const [employees, setEmployees] = useState([]);
@@ -1151,7 +1227,7 @@ function Dashboard({ employee, onLogout }) {
   const tabs = [
     ["connections", "الربط والمنصات"], ["style", "الأسلوب والسلوك"], ["security", "الأمان والحواجز"],
     ["human", "التحكم اليدوي"], ["menu", "المنيو والصور"], ["delivery", "التوصيل والأسعار"],
-    ["orders", "الطلبات"], ["employees", "الموظفين والصلاحيات"],
+    ["orders", "الطلبات"], ["conversations", "المحادثات"], ["employees", "الموظفين والصلاحيات"],
   ];
 
   return (
@@ -1200,6 +1276,7 @@ function Dashboard({ employee, onLogout }) {
         {selectedBot && tab === "menu" && <MenuPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "delivery" && <DeliveryPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "orders" && <OrdersPanel bot={selectedBot} api={api} />}
+        {selectedBot && tab === "conversations" && <ConversationsPanel bot={selectedBot} api={api} />}
         {selectedBot && tab === "employees" && <EmployeesPanel api={api} allBots={bots} />}
       </main>
     </div>

@@ -21,6 +21,24 @@ function authFolder(botId) {
   return path.join(__dirname, "..", "data", "bots", botId, "wa-auth");
 }
 
+// بيعيد محاولة الاتصال بعد فترة انتظار (بتزيد تدريجياً لحد سقف دقيقة)، وبيكرر المحاولة تلقائياً لو فشلت
+// المحاولة نفسها (مش بس لو انقطع اتصال ناجح) — عشان أي مشكلة شبكة عابرة ما توقف إعادة الاتصال للأبد.
+const reconnectDelays = new Map(); // botId -> آخر مدة انتظار استخدمناها
+
+function scheduleReconnect(botId) {
+  const delay = reconnectDelays.get(botId) || 3000;
+  console.log(`[wa:${botId}] رح أعيد محاولة الاتصال خلال ${Math.round(delay / 1000)} ثانية...`);
+  setTimeout(() => {
+    startBotConnection(botId)
+      .then(() => reconnectDelays.delete(botId)) // نجحت — نرجع نصفّر مدة الانتظار لأي مرة جاية
+      .catch((err) => {
+        console.error(`[wa:${botId}] فشلت محاولة إعادة الاتصال:`, err.message);
+        reconnectDelays.set(botId, Math.min(delay * 2, 60000));
+        scheduleReconnect(botId);
+      });
+  }, delay);
+}
+
 async function startBotConnection(botId) {
   const {
     default: makeWASocket,
@@ -31,7 +49,15 @@ async function startBotConnection(botId) {
   } = require("@whiskeysockets/baileys");
 
   const { state, saveCreds } = await useMultiFileAuthState(authFolder(botId));
-  const { version } = await fetchLatestBaileysVersion();
+
+  // لو فشل جلب آخر نسخة (مشكلة شبكة مؤقتة مثلاً)، ما بدنا هاد الفشل يوقف كل محاولة الاتصال —
+  // منكمل بالنسخة الافتراضية المدمجة بمكتبة Baileys بدل ما تتعلق كل عملية إعادة الاتصال على هاد الطلب الخارجي.
+  let version;
+  try {
+    ({ version } = await fetchLatestBaileysVersion());
+  } catch (err) {
+    console.warn(`[wa:${botId}] ما قدرت أجيب آخر نسخة Baileys، هستخدم النسخة الافتراضية:`, err.message);
+  }
 
   const sock = makeWASocket({
     auth: state,
@@ -76,7 +102,9 @@ async function startBotConnection(botId) {
       conn.status = "disconnected";
       const loggedOut = lastDisconnect?.error?.output?.statusCode === DisconnectReason.loggedOut;
       if (!loggedOut) {
-        startBotConnection(botId); // إعادة محاولة تلقائية
+        // إعادة محاولة تلقائية — بـ .catch() صريح + إعادة جدولة، عشان لو فشلت المحاولة نفسها (مثلاً مشكلة شبكة
+        // عابرة قبل ما يتفتح أي socket أصلاً) ما يضل الاتصال عالق "منقطع" للأبد بصمت بدون أي محاولة تانية.
+        scheduleReconnect(botId);
       } else {
         botStore.updateBot(botId, { status: "pending_connection" });
       }
@@ -133,6 +161,22 @@ async function startBotConnection(botId) {
   return connections.get(botId);
 }
 
+// بيقفل أي اتصال قديم عالق (لو موجود) وبيبلش اتصال جديد من الصفر — زر "إعادة تشغيل الاتصال" بالداشبورد بيستخدمها
+// لما الاتصال يعلق "منقطع" وما عم يرجع يوصل لحاله. بيستخدم نفس ملفات الجلسة المحفوظة، فلو لسا صالحة ما بيحتاج مسح QR من جديد.
+async function restartBotConnection(botId) {
+  reconnectDelays.delete(botId); // منمسح أي انتظار متراكم من محاولات سابقة فاشلة، عشان المحاولة اليدوية تصير فوراً
+  const existing = connections.get(botId);
+  if (existing?.sock) {
+    try {
+      existing.sock.end(new Error("إعادة تشغيل يدوية من الداشبورد"));
+    } catch (err) {
+      console.warn(`[wa:${botId}] خطأ بسيط أثناء إغلاق الاتصال القديم (متجاهله):`, err.message);
+    }
+  }
+  connections.delete(botId);
+  return startBotConnection(botId);
+}
+
 async function startAllActiveBots() {
   const bots = botStore.listBots();
   for (const bot of bots) {
@@ -176,4 +220,4 @@ function getQrStatus(botId) {
   return { status: conn.status, qr: conn.qr };
 }
 
-module.exports = { startBotConnection, startAllActiveBots, sendText, sendImage, getGroups, getQrStatus };
+module.exports = { startBotConnection, restartBotConnection, startAllActiveBots, sendText, sendImage, getGroups, getQrStatus };
