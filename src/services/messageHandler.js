@@ -34,6 +34,88 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// بينظف نص أمر التحكم اليدوي (وقف/كمل) قبل المقارنة — مشكلة كانت موجودة: المقارنة كانت "===" حرفية
+// صارمة، فأي شي زايد بسيط (علامة ترقيم "وقف!"، أو محرف اتجاه خفي (RTL/LTR mark) بعض لوحات المفاتيح
+// بتضيفه تلقائياً مع النص العربي، أو حتى مسافة زايدة) كان يخلي المطابقة تفشل بصمت والبوت يكمل يرد عادي
+// وكأنو الزبون ما كتب شي مميز أصلاً.
+// محارف تباعد/اتجاه غير مرئية (zero-width space/joiner، RTL/LTR marks، BOM) — بعض لوحات المفاتيح
+// (خصوصاً بالموبايل) بتضيفها تلقائياً حوالين نص عربي بدون ما المستخدم يحس، وهاد كان يخلي مقارنة
+// "===" الصارمة القديمة لكلمة الإيقاف/الاستئناف تفشل بصمت. مبنية من أكواد المحارف مباشرة (بدون نسخ/لصق
+// محارف غير مرئية بالكود) عشان نضمن صحتها 100%.
+const INVISIBLE_CHAR_CODES = [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0xfeff];
+const INVISIBLE_CHARS_RE = new RegExp(`[${INVISIBLE_CHAR_CODES.map((c) => `\\u${c.toString(16).padStart(4, "0")}`).join("")}]`, "g");
+
+function normalizeCommandText(text) {
+  return (text || "")
+    .normalize("NFC")
+    .replace(INVISIBLE_CHARS_RE, "")
+    .trim()
+    .replace(/[!.؟?,،]+$/g, "") // علامات ترقيم بآخر الرسالة (مثلاً "وقف!" أو "كمل؟")
+    .trim();
+}
+
+function getHumanTakeoverWords(botId) {
+  try {
+    const bot = botStore.getBot(botId);
+    if (!bot) return { stopWords: [], resumeWords: [] };
+    const settings = store.read(`configs/${bot.configId}/settings.json`);
+    const humanTakeover = settings?.humanTakeover || {};
+    return {
+      stopWords: (humanTakeover.stopWords || []).map(normalizeCommandText).filter(Boolean),
+      resumeWords: (humanTakeover.resumeWords || []).map(normalizeCommandText).filter(Boolean),
+    };
+  } catch (err) {
+    return { stopWords: [], resumeWords: [] };
+  }
+}
+
+// بيتحقق هل رسالة خام (مش مجمّعة مع غيرها) هي بالضبط كلمة إيقاف أو استئناف — لازم نتحقق منها على
+// كل رسالة توصل لحالها (قبل التجميع بالبفر)، مش بعد ما تنضم مع رسائل تانية، وإلا أمر زي "وقف" ممكن
+// يوصل بنفس ثانية رسالة تانية من الزبون وينضموا مع بعض بالتجميع، فتصير المقارنة "وقف\nنص تاني" ولا تطابق
+// كلمة الإيقاف حرفياً — يعني الأمر يفشل بصمت رغم إنو الزبون كتبه صح.
+function checkTakeoverCommand(botId, rawText) {
+  const normalized = normalizeCommandText(rawText);
+  if (!normalized) return null;
+  const { stopWords, resumeWords } = getHumanTakeoverWords(botId);
+  if (stopWords.includes(normalized)) return "stop";
+  if (resumeWords.includes(normalized)) return "resume";
+  return null;
+}
+
+// بينفذ أمر الإيقاف/الاستئناف فوراً (بدون ما ينتظر تجميع الرسائل ولا الذكاء الاصطناعي)، وبيرد على الزبون
+// برسالة تأكيد قصيرة — قبل هيك ما كان في أي رد أبداً لما الأمر ينفذ، فما كان في طريقة يتأكد فيها الزبون
+// (أو صاحب البوت وهو يجرب الميزة) إنو الأمر فعلاً اشتغل، خصوصاً إنو الرد العادي أصلاً بياخذ ثواني.
+async function applyTakeoverCommand(botId, from, action, sendText) {
+  const pausedRaw = store.read(`bots/${botId}/pausedConversations.json`);
+  const paused = Array.isArray(pausedRaw) ? {} : pausedRaw;
+
+  if (action === "stop") {
+    const alreadyPaused = Boolean(paused[from]);
+    paused[from] = { since: new Date().toISOString() };
+    store.write(`bots/${botId}/pausedConversations.json`, paused);
+    trace(`applyTakeoverCommand: أوقفت الرد التلقائي لـ ${from} (بوت=${botId}).`);
+    if (!alreadyPaused && sendText) {
+      try {
+        await sendText(from, "تمام ✅ وقفت الرد التلقائي على هالمحادثة — ما رح أرد عليك لحد ما تكتب كلمة الاستئناف.");
+      } catch (err) {
+        console.error("[messageHandler] فشل إرسال تأكيد الإيقاف:", err.message);
+      }
+    }
+  } else {
+    const wasPaused = Boolean(paused[from]);
+    delete paused[from];
+    store.write(`bots/${botId}/pausedConversations.json`, paused);
+    trace(`applyTakeoverCommand: رجّعت الرد التلقائي لـ ${from} (بوت=${botId}).`);
+    if (wasPaused && sendText) {
+      try {
+        await sendText(from, "تمام ✅ رجع الرد التلقائي.");
+      } catch (err) {
+        console.error("[messageHandler] فشل إرسال تأكيد الاستئناف:", err.message);
+      }
+    }
+  }
+}
+
 // حماية من تعليق استدعاء الذكاء الاصطناعي إلى ما لا نهاية (مثلاً تعليق بالشبكة) —
 // لو ما رد خلال هاي المدة منرمي خطأ عادي، نقدر نمسكه ونرد برسالة احتياطية بدل ما يضل الرد عالق للأبد بصمت.
 const AI_TIMEOUT_MS = 25000;
@@ -295,24 +377,10 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
   // ملاحظة: بعض البوتات القديمة (متل "default") انعمل إلها الملف تلقائياً كمصفوفة "[]" بدل كائن "{}"
   // (bug قديم بـ store.ensureFile). لو صار هيك، أي كتابة عليه بعدين بتضيع بصمت لأن
   // JSON.stringify على مصفوفة بيتجاهل أي property نصية زايدة عليها. نحمي نفسنا هون بتحويلها كائن.
+  // ملاحظة: كلمات الإيقاف/الاستئناف نفسها بتتفحص وتتنفذ فوراً بـ queueIncomingMessage (قبل ما توصل هون
+  // أصلاً) — شوف checkTakeoverCommand/applyTakeoverCommand فوق. هون بس منتأكد المحادثة مش موقوفة حالياً.
   const pausedRaw = store.read(`bots/${botId}/pausedConversations.json`);
   const paused = Array.isArray(pausedRaw) ? {} : pausedRaw;
-  const { stopWords, resumeWords } = settings.humanTakeover;
-  const normalized = (text || "").trim();
-
-  if (stopWords.some((w) => normalized === w)) {
-    trace(`handleIncomingMessage: كلمة إيقاف من ${from} — وقّفت المحادثة.`);
-    paused[from] = { since: new Date().toISOString() };
-    store.write(`bots/${botId}/pausedConversations.json`, paused);
-    return;
-  }
-
-  if (resumeWords.some((w) => normalized === w)) {
-    trace(`handleIncomingMessage: كلمة استئناف من ${from} — رجّعت المحادثة.`);
-    delete paused[from];
-    store.write(`bots/${botId}/pausedConversations.json`, paused);
-    return;
-  }
 
   if (paused[from]) {
     trace(`handleIncomingMessage: المحادثة مع ${from} موقوفة (تدخل بشري) — تجاهلت.`);
@@ -497,6 +565,31 @@ function queueIncomingMessage(botId, from, text, image, sendText, onTypingStart,
   }
 
   const key = bufferKey(botId, from);
+
+  // أمر إيقاف/استئناف — بيتفحص فوراً على الرسالة الخام (قبل ما تنضم لأي بفر تجميع منتظر)، عشان:
+  // (1) لو في رسالة تانية عالقة بنفس نافذة التجميع، ما تنضم مع "وقف"/"كمل" وتخلي المطابقة تفشل،
+  // (2) الرد يوصل فوراً (تأكيد قصير) بدل ما ينتظر مدة التجميع الكاملة زي رد عادي.
+  if (text) {
+    const bot = botStore.getBot(botId);
+    // لو البوت موقوف كامل يدوياً، أو القناة هاي بالذات موقوفة، ما لازم نرد ولا حتى بتأكيد إيقاف/استئناف —
+    // بنسيب الرسالة تكمل بالمسار العادي (بتنرمى بصمت جوا handleIncomingMessage زي أي رسالة تانية).
+    const botActive = bot && bot.enabled !== false && !(bot.channelEnabled && bot.channelEnabled[channel] === false);
+    const takeoverAction = botActive ? checkTakeoverCommand(botId, text) : null;
+    if (takeoverAction) {
+      const existingBuffer = pendingBuffers.get(key);
+      if (existingBuffer) {
+        clearTimeout(existingBuffer.timer);
+        pendingBuffers.delete(key);
+        trace(`queueIncomingMessage: أمر تحكم يدوي (${takeoverAction}) من ${from} — ألغيت بفر معلق كان بالانتظار.`);
+      }
+      applyTakeoverCommand(botId, from, takeoverAction, sendText).catch((err) => {
+        trace(`queueIncomingMessage: خطأ بتنفيذ أمر التحكم اليدوي (${takeoverAction}) لـ ${from}: ${err.message}`);
+        console.error("[messageHandler] خطأ بتنفيذ أمر التحكم اليدوي:", err.message);
+      });
+      return;
+    }
+  }
+
   const existing = pendingBuffers.get(key);
   const { debounceMs } = getTimingSettings(botId);
 

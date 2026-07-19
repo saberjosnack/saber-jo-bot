@@ -1024,42 +1024,140 @@ function DeliveryFormulaPanel({ bot, api }) {
   );
 }
 
+const GENERAL_AREAS_KEY = "__general__"; // مناطق مش مربوطة بفرع معيّن (branchId فاضي) — تنطبق بغض النظر عن الفرع
+
+// بيحول محتوى ملف CSV/نص لقائمة {area, fee} — يدعم فاصلة أو فاصلة منقوطة أو تاب بين اسم المنطقة والسعر.
+// أي سطر مش قابل للتحويل (زي سطر عنوان الأعمدة "المنطقة,السعر") بينترشح تلقائياً لأنو السعر مش رقم صحيح.
+function parseAreasFile(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(/[,،;\t]/).map((p) => p.trim());
+      if (parts.length < 2) return null;
+      const area = parts[0];
+      const fee = Number(parts[1].replace(",", "."));
+      if (!area || Number.isNaN(fee)) return null;
+      return { area, fee };
+    })
+    .filter(Boolean);
+}
+
+function downloadAreasTemplate() {
+  const csv = "المنطقة,السعر\nشارع الجامعة,1.5\nجبل الحسين,2\n";
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "نموذج_مناطق_التوصيل.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function DeliveryAreasPanel({ bot, api }) {
   const [fees, setFees] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [activeKey, setActiveKey] = useState(GENERAL_AREAS_KEY); // GENERAL_AREAS_KEY أو معرّف فرع
   const [area, setArea] = useState(""); const [fee, setFee] = useState(""); const [q, setQ] = useState("");
-  const load = () => api(`/api/bots/${bot.id}/delivery-fees`).then(setFees);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const load = () => {
+    api(`/api/bots/${bot.id}/delivery-fees`).then(setFees);
+    api(`/api/bots/${bot.id}/branches`).then(setBranches);
+  };
   useEffect(() => { load(); }, [bot.id]);
+
   const save = async (updated) => { setFees(updated); await api(`/api/bots/${bot.id}/delivery-fees`, { method: "PUT", body: updated }); };
-  const addRow = () => { if (!area.trim() || !fee) return; save([...fees, { area: area.trim(), fee: Number(fee) }]); setArea(""); setFee(""); };
-  const clearAll = () => { if (!fees.length) return; if (!confirm(`متأكد بدك تمسح كل مناطق التوصيل (${fees.length})؟`)) return; save([]); };
-  const filtered = fees.filter((f) => f.area.toLowerCase().includes(q.toLowerCase()));
+  const activeBranchId = activeKey === GENERAL_AREAS_KEY ? null : activeKey;
+  const activeLabel = activeKey === GENERAL_AREAS_KEY ? "عام (كل الفروع)" : (branches.find((b) => b.id === activeKey)?.name || "فرع");
+
+  const matchesActive = (f) => (f.branchId || null) === activeBranchId;
+  const activeFees = fees.filter(matchesActive);
+  const filtered = activeFees.filter((f) => f.area.toLowerCase().includes(q.toLowerCase()));
+
+  const addRow = () => {
+    if (!area.trim() || !fee) return;
+    save([...fees, { area: area.trim(), fee: Number(fee), branchId: activeBranchId }]);
+    setArea(""); setFee("");
+  };
+  const removeRow = (target) => save(fees.filter((f) => f !== target));
+  const clearActive = () => {
+    if (!activeFees.length) return;
+    if (!confirm(`متأكد بدك تمسح كل مناطق "${activeLabel}" (${activeFees.length})؟`)) return;
+    save(fees.filter((f) => !matchesActive(f)));
+  };
+
+  const handleUploadFile = async (file) => {
+    if (!file) return;
+    setUploadMsg(""); setUploading(true);
+    try {
+      const text = await file.text();
+      const rows = parseAreasFile(text);
+      if (!rows.length) {
+        setUploadMsg("✗ ما لقيت أي صفوف صحيحة بالملف. الصيغة المطلوبة: كل سطر فيه اسم المنطقة وبعده فاصلة وبعدها السعر — مثال: شارع الجامعة,1.5");
+        return;
+      }
+      const tagged = rows.map((r) => ({ ...r, branchId: activeBranchId }));
+      // بيستبدل بس مناطق الفرع/العام المختار حالياً بالقائمة الجديدة — باقي الفروع بتضل زي ما هي بدون أي تغيير
+      const others = fees.filter((f) => !matchesActive(f));
+      await save([...others, ...tagged]);
+      setUploadMsg(`✅ استوردت ${rows.length} منطقة لـ"${activeLabel}" (استبدلت القائمة القديمة لنفس الفرع/التصنيف بس).`);
+    } catch (err) {
+      setUploadMsg("✗ فشل قراءة الملف: " + err.message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   return (
     <div className="panel">
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>مناطق برسوم ثابتة (لما الزبون يكتب منطقته نصاً)</div>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>مناطق برسوم ثابتة لكل فرع (لما الزبون يكتب منطقته نصاً)</div>
       <div className="small" style={{ color: "var(--ink-dim)", marginBottom: 14 }}>
-        هاي قائمة احتياطية لمناطق برسم ثابت متفق عليه — تستخدم لو الزبون كتب اسم منطقته بدل ما يبعت موقعه المباشر.
+        هاي قائمة احتياطية لمناطق برسم ثابت متفق عليه — تستخدم لو الزبون كتب اسم منطقته بدل ما يبعت موقعه المباشر. حدد الفرع تحت، وضيف مناطقه يدوياً أو ارفعلها ملف CSV دفعة وحدة.
       </div>
+
+      <div className="flex gap8 mb14" style={{ flexWrap: "wrap" }}>
+        <div className={`chip ${activeKey === GENERAL_AREAS_KEY ? "active" : ""}`} onClick={() => setActiveKey(GENERAL_AREAS_KEY)}>عام (كل الفروع)</div>
+        {branches.map((b) => (
+          <div key={b.id} className={`chip ${activeKey === b.id ? "active" : ""}`} onClick={() => setActiveKey(b.id)}>{b.name || "فرع بدون اسم"}</div>
+        ))}
+        {branches.length === 0 && <span className="small" style={{ color: "var(--ink-dim)" }}>ما في فروع مسجلة بعد (تبويب "الفروع") — المناطق يلي تضيفها هلأ بتنحسب "عامة".</span>}
+      </div>
+
+      <div className="panel-2 mb14">
+        <div className="flex gap8" style={{ alignItems: "center", flexWrap: "wrap" }}>
+          <input ref={fileInputRef} type="file" accept=".csv,.txt" style={{ display: "none" }} onChange={(e) => handleUploadFile(e.target.files?.[0])} />
+          <button className="btn-ghost" disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? "جاري الاستيراد..." : `📤 ارفع ملف مناطق لـ"${activeLabel}"`}</button>
+          <button className="btn-ghost" onClick={downloadAreasTemplate}>⬇️ تحميل نموذج CSV فاضي</button>
+        </div>
+        <div className="small" style={{ color: "var(--ink-dim)", marginTop: 8 }}>
+          صيغة الملف: كل سطر — اسم المنطقة، فاصلة، السعر (مثال: <span dir="ltr">شارع الجامعة,1.5</span>). رفع ملف جديد بيستبدل قائمة "{activeLabel}" الحالية بس، وما بيأثر على باقي الفروع.
+        </div>
+        {uploadMsg && <div className="small" style={{ color: uploadMsg.startsWith("✅") ? "var(--olive)" : "var(--red)", marginTop: 8 }}>{uploadMsg}</div>}
+      </div>
+
       <div className="flex gap8 mb14">
         <input placeholder="بحث عن منطقة..." value={q} onChange={(e) => setQ(e.target.value)} />
-        <input placeholder="منطقة جديدة" value={area} onChange={(e) => setArea(e.target.value)} />
+        <input placeholder={`منطقة جديدة بـ"${activeLabel}"`} value={area} onChange={(e) => setArea(e.target.value)} />
         <input placeholder="السعر" style={{ width: 100 }} value={fee} onChange={(e) => setFee(e.target.value)} />
         <button className="btn" onClick={addRow}>إضافة</button>
-        {fees.length > 0 && <button className="btn-danger" onClick={clearAll}>🗑 امسح الكل</button>}
+        {activeFees.length > 0 && <button className="btn-danger" onClick={clearActive}>🗑 امسح مناطق "{activeLabel}"</button>}
       </div>
       <div style={{ maxHeight: 380, overflowY: "auto" }} className="flexcol gap8">
-        {filtered.map((f, idx) => {
-          const realIdx = fees.indexOf(f);
-          return (
-            <div key={idx} className="panel-2 flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <span>{f.area}</span>
-              <div className="flex gap10" style={{ alignItems: "center" }}>
-                <span style={{ color: "var(--amber)" }}>{f.fee} د.أ</span>
-                <button className="btn-danger" onClick={() => save(fees.filter((_, i) => i !== realIdx))}>حذف</button>
-              </div>
+        {filtered.length === 0 && <p style={{ color: "var(--ink-dim)", fontSize: 13 }}>ولا منطقة مسجلة لـ"{activeLabel}" بعد.</p>}
+        {filtered.map((f, idx) => (
+          <div key={idx} className="panel-2 flex" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <span>{f.area}</span>
+            <div className="flex gap10" style={{ alignItems: "center" }}>
+              <span style={{ color: "var(--amber)" }}>{f.fee} د.أ</span>
+              <button className="btn-danger" onClick={() => removeRow(f)}>حذف</button>
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
     </div>
   );
