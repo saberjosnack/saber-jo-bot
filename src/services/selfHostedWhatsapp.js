@@ -272,11 +272,30 @@ async function sendImage(botId, to, imageUrl, caption = "") {
   await conn.sock.sendMessage(toJid(to), { image: { url: imageUrl }, caption });
 }
 
+// مهلة قصوى صلبة لجلب الجروبات — لاحظنا إنو استعلام Baileys الداخلي (groupFetchAllParticipating) ممكن يعلق
+// "معلّق" فعلياً بدون ما يرجع نجاح ولا فشل (مثلاً لو السوكت "زومبي" اتقطع فعلياً بس الحدث ما انطلق)، رغم
+// إنو فيه مهلة داخلية بالمكتبة (defaultQueryTimeoutMs) — المفروض تحمي بس ما منضمن دايماً تشتغل صح بكل الحالات.
+// هاي حماية إضافية عنا: نضمن الطلب من الداشبورد ما يضل عالق للأبد ("جاري الجلب..." بلا نهاية)، وبيرجع
+// خطأ واضح للمستخدم بعد وقت معقول بدل ما يعلق لساعات.
+const GROUPS_FETCH_TIMEOUT_MS = 25000;
+
+function withHardTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} أخذ وقت أطول من ${Math.round(ms / 1000)} ثانية بدون رد — جرب تاني، أو تأكد إن البوت متصل فعلياً بواتساب.`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // بيرجع قائمة جروبات الواتساب المتصلة بهاد البوت (ربط مباشر عن طريق QR) — مجاني بالكامل، بدون أي وسيط خارجي،
 // لأنه اتصال Baileys مباشر بواتساب نفسه.
 async function getGroups(botId) {
   const conn = requireConnectedSock(botId);
-  const groupsMap = await conn.sock.groupFetchAllParticipating();
+  const groupsMap = await withHardTimeout(
+    conn.sock.groupFetchAllParticipating(),
+    GROUPS_FETCH_TIMEOUT_MS,
+    "جلب قائمة الجروبات"
+  );
   return Object.values(groupsMap).map((g) => ({ jid: g.id, name: g.subject }));
 }
 

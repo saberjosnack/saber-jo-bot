@@ -65,14 +65,30 @@ function Switch({ on, onClick }) {
   );
 }
 
+// مهلة قصوى لأي طلب من الداشبورد — قبل هاد الإصلاح، لو طلب عالق بالسيرفر (زي جلب جروبات واتساب لو
+// السوكت "زومبي")، الزر بيضل عالق "جاري..." للأبد بلا أي رسالة خطأ، لأنو fetch بلا AbortController
+// ما بينتهي إلا لما يرجع السيرفر رد فعلياً. هيك منضمن كل طلب يرجع خطأ واضح بعد وقت معقول بدل ما يعلق.
+const API_TIMEOUT_MS = 30000;
+
 function useApi() {
   const token = localStorage.getItem("sj_token");
   return useCallback(async (path, opts = {}) => {
-    const res = await fetch(path, {
-      ...opts,
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(path, {
+        ...opts,
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      });
+    } catch (err) {
+      if (err.name === "AbortError") throw new Error(`الطلب أخذ وقت أطول من ${API_TIMEOUT_MS / 1000} ثانية بدون رد — جرب تاني.`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 401) { localStorage.removeItem("sj_token"); window.location.reload(); throw new Error("انتهت الجلسة"); }
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error(data?.error || "صار خطأ");
