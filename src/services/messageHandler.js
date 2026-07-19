@@ -48,12 +48,29 @@ function computeHumanDelay(replyText, timing = DEFAULT_TIMING) {
 // أقصى عدد صور نبعتها تلقائياً على نفس الرد الواحد — حماية من إغراق الزبون بصور لو ذكر كذا صنف
 const MAX_AUTO_IMAGES_PER_REPLY = 2;
 
-// بيدوّر على أصناف "متوفرة" وعندها صورة محفوظة، واسمها مذكور حرفياً برسالة الزبون أو برد البوت.
-// مطابقة بسيطة بالنص (مش ذكاء اصطناعي) — كافية لأنو البوت أصلاً متعلّم يذكر اسم الصنف الحرفي من المنيو.
+function normalizeSpaces(s) {
+  return (s || "").replace(/\s+/g, " ").trim();
+}
+
+// بيدوّر على أصناف "متوفرة" وعندها صورة محفوظة، واسمها مذكور برسالة الزبون أو برد البوت.
+// مطابقة بسيطة بالنص (مش ذكاء اصطناعي). ملاحظة: قبل هيك كنا نطلب تطابق اسم الصنف الكامل بالضبط
+// (مثلاً "رويال سليم  للتنحيف علبه 1" بمسافتين) — بس بالواقع البوت غالباً بيذكر بس الاسم التجاري
+// المختصر ("رويال سليم") برده الطبيعي، فما كان يطابق أبداً وتضل الصورة ما ترسل حتى لو الزبون طلبها صراحة.
+// هلأ منجرب كمان مطابقة أول كلمتين من اسم الصنف (الاسم التجاري المختصر) كاحتياط.
 function findMentionedItemsWithImages(menu, userText, replyText) {
-  const haystack = `${userText || ""} ${replyText || ""}`;
-  if (!haystack.trim()) return [];
-  return menu.filter((item) => item.available && item.imageUrl && item.name && haystack.includes(item.name));
+  const haystack = normalizeSpaces(`${userText || ""} ${replyText || ""}`);
+  if (!haystack) return [];
+  return menu.filter((item) => {
+    if (!item.available || !item.imageUrl || !item.name) return false;
+    const fullName = normalizeSpaces(item.name);
+    if (haystack.includes(fullName)) return true;
+    const words = fullName.split(" ").filter(Boolean);
+    if (words.length >= 2) {
+      const shortKey = words.slice(0, 2).join(" ");
+      if (shortKey.length >= 4 && haystack.includes(shortKey)) return true;
+    }
+    return false;
+  });
 }
 
 // بيرجع بيانات الزبون المحفوظة من طلب سابق (لو موجودة) — عشان البوت يتعرف على الزبون الراجع
