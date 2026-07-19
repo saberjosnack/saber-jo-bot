@@ -542,7 +542,6 @@ function StylePanel({ bot, api, refreshBots }) {
   const [groups, setGroups] = useState(null);
   const [groupsErr, setGroupsErr] = useState("");
   const [loadingGroups, setLoadingGroups] = useState(false);
-  const [syncingPos, setSyncingPos] = useState(false);
 
   useEffect(() => {
     api(`/api/bots/${bot.id}/settings`).then((data) => {
@@ -559,23 +558,6 @@ function StylePanel({ bot, api, refreshBots }) {
 
   const save = async () => { await api(`/api/bots/${bot.id}/settings`, { method: "PUT", body: s }); alert("تم الحفظ ✅"); };
   const toggleTone = (t) => setS({ ...s, style: { ...s.style, tones: s.style.tones.includes(t) ? s.style.tones.filter(x => x !== t) : [...s.style.tones, t] } });
-
-  const togglePosSync = async () => {
-    await api(`/api/bots/${bot.id}/pos-sync`, { method: "PUT", body: { enabled: !bot.posSync?.enabled } });
-    refreshBots();
-  };
-  const runPosSyncNow = async () => {
-    setSyncingPos(true);
-    try {
-      const r = await api(`/api/bots/${bot.id}/pos-sync/run`, { method: "POST" });
-      alert(`✓ تحديث ناجح: ${r.itemsSynced} صنف، ${r.codesSynced} كود خصم.`);
-    } catch (err) {
-      alert("✗ فشل التحديث: " + err.message);
-    } finally {
-      setSyncingPos(false);
-      refreshBots();
-    }
-  };
 
   const loadGroups = async () => {
     setLoadingGroups(true); setGroupsErr("");
@@ -694,19 +676,6 @@ function StylePanel({ bot, api, refreshBots }) {
             <div><label className="small">اسم الصوت</label><input value={s.voice.voiceName} onChange={(e) => setS({ ...s, voice: { ...s.voice, voiceName: e.target.value } })} /></div>
           </div>
         )}
-      </div>
-
-      <div className="panel">
-        <div className="flex" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <div style={{ fontWeight: 700 }}>مزامنة المنيو من الكاشير (POS)</div>
-          <Switch on={Boolean(bot.posSync?.enabled)} onClick={togglePosSync} />
-        </div>
-        <div className="small" style={{ color: "var(--ink-dim)", marginBottom: 10 }}>لما تكون مفعّلة، المنيو (الأصناف، الأسعار، التوفر) وأكواد الخصم بتنسحب تلقائياً من نظام الكاشير كل ساعة. صفة "صنف مميز" يلي تحددها إنت يدوياً بتبويب "المنيو" بتضل محفوظة حتى بعد كل تحديث.</div>
-        <div className="flex gap8" style={{ alignItems: "center" }}>
-          <button className="btn-ghost" disabled={syncingPos} onClick={runPosSyncNow}>{syncingPos ? "جاري التحديث..." : "🔄 تحديث الآن"}</button>
-          {bot.posSync?.lastSyncAt && <span className="small" style={{ color: "var(--ink-dim)" }}>آخر تحديث: {new Date(bot.posSync.lastSyncAt).toLocaleString("ar-JO")}</span>}
-        </div>
-        {bot.posSync?.lastError && <div style={{ fontSize: 12, color: "var(--red, #d9534f)", marginTop: 8 }}>آخر خطأ: {bot.posSync.lastError}</div>}
       </div>
 
       <div className="panel flex" style={{ justifyContent: "space-between" }}>
