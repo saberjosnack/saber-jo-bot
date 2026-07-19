@@ -366,6 +366,40 @@ router.get("/:id/orders", requireRole("owner", "orders", "viewer"), (req, res) =
   res.json(store.read(`bots/${req.params.id}/orders.json`));
 });
 
+// إدخال طلب يدوياً — تستخدم لتصحيح طلبات "ضاعت" (اتأكدت للزبون بالمحادثة بس ما انسجلت فعلياً) بعد
+// ما نتأكد يدوياً من تفاصيلها الصحيحة الوحيدة النهائية (تفادياً لتكرار نفس الطلب لو انأكد أكتر من مرة بنفس المحادثة).
+// body: { from, itemsSummary, area, totalPrice?, customerName?, contactPhone?, notes?, channel? }
+router.post("/:id/orders/manual", requireRole("owner"), async (req, res) => {
+  const bot = botStore.getBot(req.params.id);
+  if (!bot) return res.status(404).json({ error: "البوت غير موجود." });
+
+  const { from, itemsSummary, area, totalPrice, customerName, contactPhone, notes, channel } = req.body;
+  if (!from || !itemsSummary || !area) {
+    return res.status(400).json({ error: "لازم from و itemsSummary و area." });
+  }
+
+  try {
+    await recordOrder(
+      bot,
+      from,
+      channel || "manual",
+      {
+        itemsSummary,
+        area,
+        totalPrice: typeof totalPrice === "number" ? totalPrice : null,
+        customerName: customerName || "",
+        contactPhone: contactPhone || "",
+        notes: notes || "",
+      }
+    );
+    const orders = store.read(`bots/${bot.id}/orders.json`);
+    res.json({ ok: true, order: orders[orders.length - 1] });
+  } catch (err) {
+    console.error("[orders/manual] خطأ:", err);
+    res.status(500).json({ error: "فشل تسجيل الطلب اليدوي: " + err.message });
+  }
+});
+
 // تحديث حالة طلب — مستخدم حالياً لزر "تم إرسال الطلب لشركة التوصيل" (بيحوّل الطلب لـ "مكتمل" ويطلعه من القائمة الحالية)
 // body: { status: "new" | "completed" }
 router.patch("/:id/orders/:orderId", requireRole("owner", "orders"), (req, res) => {
