@@ -151,7 +151,14 @@ async function startBotConnection(botId) {
     for (const msg of messages) {
       if (msg.key.fromMe || !msg.message) continue;
 
-      const from = msg.key.remoteJid?.replace("@s.whatsapp.net", "");
+      // واتساب صار يبعت رسائل بعض الزبائن بمعرّف "@lid" (Linked ID) بدل رقم الهاتف العادي "@s.whatsapp.net"
+      // (نظام خصوصية أحدث بيخفي رقم الزبون الحقيقي). لو مسحنا اللاحقة زي ما كنا نعمل قبل، بيضل الرقم
+      // بدون أي لاحقة، وبعدين toJid() بترجع تضيفله "@s.whatsapp.net" غلط فيصير معرّف تالف زي
+      // "123@lid@s.whatsapp.net" — وهاد بالضبط سبب انقطاع الاتصال المفاجئ لما نحاول نرد (stream error:
+      // xml-not-well-formed). فلازم نخلي معرّف الـ lid كامل زي ما هو، وما نحاول نرجعه لرقم عادي.
+      const from = msg.key.remoteJid?.endsWith("@lid")
+        ? msg.key.remoteJid
+        : msg.key.remoteJid?.replace("@s.whatsapp.net", "");
       let text =
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
@@ -234,7 +241,7 @@ async function startAllActiveBots() {
 
 // معرّف جروب بواتساب دايماً منتهي بـ"@g.us" — لو كان هيك منبعته زي ما هو، وإلا منحطله لاحقة رقم شخص عادي
 function toJid(to) {
-  return to.includes("@g.us") || to.includes("@s.whatsapp.net") ? to : `${to}@s.whatsapp.net`;
+  return to.includes("@g.us") || to.includes("@s.whatsapp.net") || to.includes("@lid") ? to : `${to}@s.whatsapp.net`;
 }
 
 // بيتأكد إنو في socket فعلي *ومتصل فعلياً* (لا بس موجود بالذاكرة) — قبل هيك كنا نتأكد بس من وجود conn.sock،
