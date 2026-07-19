@@ -92,4 +92,67 @@ async function generateReply(history, userMessage, image = null, configId = "def
   };
 }
 
-module.exports = { generateReply };
+// شبكة أمان: أحياناً الموديل بيكتب للزبون نص تأكيد ("الطلب تم تسجيله بنجاح") بدون ما ينادي فعلياً على
+// أداة record_order بنفس الرد — يعني الزبون بيتطمن إنو طلبه انسجل بس فعلياً ما انسجل شي بلوحة التحكم ولا انبعت لجروب الواتساب.
+// هاي دالة تصحيحية: منرجع نعطي الموديل نفس المحادثة (شامل رده يلي أكد فيه الطلب) ومنجبره (tool_choice) إنو
+// ينادي record_order فوراً ويستخرج تفاصيل نفس الطلب يلي أكده لتوّه، بدون ما نرسل أي شي إضافي للزبون.
+async function recoverMissedOrder(configId, history, userMessage, assistantReply) {
+  const systemPrompt = buildSystemPrompt(configId);
+
+  const messages = [
+    ...history,
+    { role: "user", content: userMessage || "[صورة]" },
+    { role: "assistant", content: assistantReply },
+    {
+      role: "user",
+      content:
+        "[ملاحظة نظام غير مرئية للزبون]: أكدت فوق للزبون إنو الطلب انسجل بنجاح. نادي حالاً على أداة record_order واستخرج منها تفاصيل نفس الطلب يلي أكدته له بالضبط (الأصناف، المنطقة، السعر لو مذكور، الاسم، الهاتف).",
+    },
+  ];
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.aiApiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: env.aiModel,
+      max_tokens: 300,
+      temperature: 0,
+      system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+      messages,
+      tools: [ORDER_TOOL],
+      tool_choice: { type: "tool", name: "record_order" },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Anthropic API error أثناء استرجاع الطلب الفائت (${response.status}): ${errText}`);
+  }
+
+  const data = await response.json();
+  const toolBlock = data.content.find((b) => b.type === "tool_use" && b.name === "record_order");
+  return toolBlock ? toolBlock.input : null;
+}
+
+// عبارات بتدل إنو الموديل أكد للزبون تسجيل الطلب — لو ظهرت بالرد بدون ما ينادي record_order، هاد مؤشر
+// قوي إنو في طلب "ضاع" (اتأكد للزبون بس ما انسجل)، ولازم نحاول نسترجعه فوراً.
+const ORDER_CONFIRMATION_PATTERNS = [
+  "تم تسجيل",
+  "تسجيله بنجاح",
+  "تم تأكيد الطلب",
+  "انسجل طلبك",
+  "طلبك انسجل",
+  "تم استلام طلبك",
+  "الطلب تم",
+];
+
+function looksLikeMissedOrderConfirmation(replyText) {
+  if (!replyText) return false;
+  return ORDER_CONFIRMATION_PATTERNS.some((p) => replyText.includes(p));
+}
+
+module.exports = { generateReply, recoverMissedOrder, looksLikeMissedOrderConfirmation };

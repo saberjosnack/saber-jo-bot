@@ -1,6 +1,6 @@
 const store = require("./store");
 const botStore = require("./botStore");
-const { generateReply } = require("./ai");
+const { generateReply, recoverMissedOrder, looksLikeMissedOrderConfirmation } = require("./ai");
 const whatsapp = require("./whatsapp");
 const { trace } = require("./trace");
 
@@ -271,6 +271,20 @@ async function handleIncomingMessage(botId, from, text, image, sendText, sendIma
     } catch (err) {
       trace(`handleIncomingMessage: فشل إرسال صورة صنف لـ ${from}: ${err.message}`);
       console.error("[messageHandler] فشل إرسال صورة صنف تلقائياً:", err.message);
+    }
+  }
+
+  // شبكة أمان: لو رد البوت للزبون بيبدو إنه أكد تسجيل طلب ("تم تسجيله بنجاح" وشبهها) بس بدون ما ينادي
+  // فعلياً على أداة record_order بنفس الرد — هاد معناه الزبون اتطمن إنو طلبه انسجل بس فعلياً ضاع بصمت.
+  // منحاول نسترجعه بمكالمة تصحيحية سريعة (tool_choice إجباري) قبل ما نستسلم ونخسر الطلب نهائياً.
+  if (!order && looksLikeMissedOrderConfirmation(reply)) {
+    trace(`handleIncomingMessage: الرد لـ ${from} بيبدو إنه أكد طلب بدون استدعاء الأداة — رح أحاول أسترجعه...`);
+    try {
+      order = await recoverMissedOrder(bot.configId, history, text, reply);
+      trace(`handleIncomingMessage: محاولة استرجاع الطلب الفائت لـ ${from} ${order ? "نجحت ✅" : "رجعت بدون طلب"}.`);
+    } catch (err) {
+      trace(`handleIncomingMessage: فشلت محاولة استرجاع الطلب الفائت لـ ${from}: ${err.message}`);
+      console.error("[messageHandler] فشل استرجاع طلب فائت:", err.message);
     }
   }
 
