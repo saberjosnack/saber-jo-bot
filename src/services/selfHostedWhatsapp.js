@@ -132,6 +132,20 @@ async function startBotConnection(botId) {
   });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    // لوج تشخيصي مؤقت — عشان نتأكد هل الحدث نفسه بيوصل أصلاً من واتساب قبل أي فلترة أو معالجة
+    // (بنشيله بعد ما نتأكد من سبب مشكلة "متصل بس ما بيرد").
+    console.log(
+      `[wa:${botId}] messages.upsert وصل: type=${type} عدد=${messages.length} تفاصيل=`,
+      JSON.stringify(
+        messages.map((m) => ({
+          fromMe: m.key.fromMe,
+          remoteJid: m.key.remoteJid,
+          hasMessage: !!m.message,
+          messageKeys: m.message ? Object.keys(m.message) : [],
+        }))
+      )
+    );
+
     if (type !== "notify") return;
 
     for (const msg of messages) {
