@@ -286,30 +286,38 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // حماية من تكرار نفس الطلب: نفس رقم الزبون + نفس الأصناف بالضبط + نفس المجموع، وانسجل قبل شوي
-    // (خلال آخر 10 دقايق) — هاد أقوى مؤشر إنو هاد نفس الطلب انسجل غلط أكتر من مرة، مش طلب جديد فعلي.
+    // حماية من تكرار/تضخيم نفس الطلب: لو نفس رقم الزبون سجّل طلب قبل شوي (خلال آخر 10 دقايق)،
+    // منعتبر هاد الطلب الجديد "نفس الطلب" (سواء الذكاء الاصطناعي كرر نفس التأكيد، أو الزبون عدّل كمية/عرض
+    // بنفس محادثة الشراء) — بدل ما نسجله كطلب إضافي منفصل (وهيك كان عم يصير: نفس الزبون يطلع بـ2-3
+    // "طلبات" لصفقة وحدة بس لأنو غيّر رأيه أو الذكاء الاصطناعي أكّد الطلب أكتر من مرة). منحدّث الطلب
+    // الموجود بدل ما نضيف واحد جديد. لو فعلاً زبون رجع اشترى تاني بعد أكتر من 10 دقايق (حتى لو بعد نص
+    // ساعة)، هاد بيتسجل طلب جديد عادي لأنو برا النافذة الزمنية.
     const dedupPhone = order.contactPhone || from;
     const dedupItemsKey = items.join("|");
     const dedupTotal = typeof order.totalPrice === "number" ? order.totalPrice : null;
     const now = Date.now();
-    const isDuplicate = orders.some((o) => {
+    const recentOrderIndex = orders.findIndex((o) => {
       if (o.phone !== dedupPhone) return false;
-      if ((o.items || []).join("|") !== dedupItemsKey) return false;
-      if (o.total !== dedupTotal) return false;
       const createdAtMs = new Date(o.createdAt).getTime();
       return Number.isFinite(createdAtMs) && now - createdAtMs < DUPLICATE_ORDER_WINDOW_MS;
     });
+    const recentOrder = recentOrderIndex !== -1 ? orders[recentOrderIndex] : null;
+    const isExactRepeat =
+      recentOrder && (recentOrder.items || []).join("|") === dedupItemsKey && recentOrder.total === dedupTotal;
 
-    if (isDuplicate) {
+    if (isExactRepeat) {
       trace(
-        `recordOrder: تجاهلت طلب مكرر (نفس الزبون/الأصناف/المجموع خلال ${Math.round(DUPLICATE_ORDER_WINDOW_MS / 60000)} دقايق) لبوت=${bot.id} from=${from}`
+        `recordOrder: تجاهلت طلب مكرر بالظبط (نفس الزبون/الأصناف/المجموع خلال ${Math.round(DUPLICATE_ORDER_WINDOW_MS / 60000)} دقايق) لبوت=${bot.id} from=${from}`
       );
       return;
     }
 
+    const isUpdateToRecentOrder = Boolean(recentOrder);
+
     const record = {
-      id: `ORD-${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      id: isUpdateToRecentOrder ? recentOrder.id : `ORD-${Date.now()}`,
+      createdAt: isUpdateToRecentOrder ? recentOrder.createdAt : new Date().toISOString(),
+      updatedAt: isUpdateToRecentOrder ? new Date().toISOString() : undefined,
       name: order.customerName || "زبون",
       phone: order.contactPhone || from,
       items,
@@ -321,7 +329,7 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
       branch: order.branch || "",
       contactMethod: order.contactMethod || "",
       notes: order.notes || "",
-      status: "new",
+      status: isUpdateToRecentOrder ? recentOrder.status || "new" : "new",
       channel,
       ...(locationContext
         ? {
@@ -338,9 +346,14 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
         : {}),
     };
 
-    orders.push(record);
+    if (isUpdateToRecentOrder) {
+      orders[recentOrderIndex] = record;
+      trace(`recordOrder: حدّثت الطلب ${record.id} (تعديل ضمن نفس نافذة الشراء) لبوت=${bot.id} from=${from} channel=${channel}`);
+    } else {
+      orders.push(record);
+      trace(`recordOrder: سجّلت طلب جديد ${record.id} لبوت=${bot.id} from=${from} channel=${channel}`);
+    }
     store.write(`bots/${bot.id}/orders.json`, orders);
-    trace(`recordOrder: سجّلت طلب جديد ${record.id} لبوت=${bot.id} from=${from} channel=${channel}`);
 
     upsertCustomerProfile(bot.id, from, order, items);
     trace(`recordOrder: حدّثت بيانات الزبون ${from} (اسم/رقم/عنوان) لبوت=${bot.id}`);
@@ -349,7 +362,7 @@ async function recordOrder(bot, from, channel, order, locationContext = null) {
     const dest = settings.orderDestination || {};
     if (dest.mode === "whatsapp_group" && dest.target) {
       const summaryLines = [
-        "🧾 طلب جديد",
+        isUpdateToRecentOrder ? "🔄 تحديث على طلب" : "🧾 طلب جديد",
         `الأصناف: ${items.length ? items.join("، ") : order.itemsSummary || "-"}`,
         record.fulfillment === "pickup"
           ? `الاستلام: من الفرع${record.branch ? ` (${record.branch})` : ""}`
